@@ -626,11 +626,10 @@ def match_table(profile_text: str = "", top_k: int = 20):
 @app.post("/admin/reset")
 def reset_database():
     """Delete all opportunities and embedding index files."""
-    from .db import SessionLocal
-    from .models import Opportunity
+    # SessionLocal and Opportunity are already imported at the top of the file
 
     # Paths must match vectorstore.py
-    DATA_DIR = os.path.abspath(os.path.join(os.getcwd(), "data"))
+    DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
     VECS_FILE = os.path.join(DATA_DIR, "opps_vecs.npy")
     IDS_FILE  = os.path.join(DATA_DIR, "opps_ids.json")
 
