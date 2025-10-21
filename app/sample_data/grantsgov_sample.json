@@ -1,0 +1,28 @@
+{
+  "opportunities": [
+    {
+      "title": "AHRQ Health Services Research Projects (R01)",
+      "OpportunityNumber": "PA-24-001",
+      "Agency": "HHS-AHRQ",
+      "Synopsis": "Supports health services research to improve quality, safety, equity, and value of healthcare.",
+      "EligibleApplicants": "Public and State controlled institutions of higher education; Private institutions of higher education",
+      "FundingInstrumentType": "Grant",
+      "PostDate": "2025-01-15",
+      "CloseDate": "2025-10-05",
+      "OpportunityLink": "https://www.grants.gov/search-results-detail/123456",
+      "AssistanceListingNumber": "93.226"
+    },
+    {
+      "title": "NIH R21 Exploratory/Developmental Research Grant",
+      "OpportunityNumber": "PA-25-021",
+      "Agency": "HHS-NIH11",
+      "Synopsis": "Exploratory/developmental research projects that break new ground or extend previous discoveries.",
+      "EligibleApplicants": "Higher Education Institutions",
+      "FundingInstrumentType": "Grant",
+      "PostDate": "2025-02-10",
+      "CloseDate": "2025-11-16",
+      "OpportunityLink": "https://www.grants.gov/search-results-detail/789012",
+      "AssistanceListingNumber": "93.121"
+    }
+  ]
+}

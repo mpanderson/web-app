@@ -1,0 +1,37 @@
+run = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --reload"
+modules = ["python-3.11", "python3"]
+
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["glibcLocales", "libxcrypt", "xcodebuild", "zlib"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Server"
+
+[[workflows.workflow]]
+name = "Server"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd app && PYTHONPATH=/home/runner/workspace/app:$PYTHONPATH uvicorn main:app --host 0.0.0.0 --port 5000"
+waitForPort = 5000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
