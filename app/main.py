@@ -633,3 +633,79 @@ def reset_opportunities():
         return {"status": "cleared"}
     finally:
         s.close()
+
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>RFA Admin</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; max-width: 900px; }
+    h1 { margin-bottom: 8px; }
+    section { margin: 24px 0; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+    button { padding: 8px 12px; }
+    .muted { color:#666; font-size: 12px; }
+    pre { background:#f7f7f7; padding:8px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <h1>RFA Matcher — Admin</h1>
+
+  <section>
+    <h3>1) Upload Grants.gov CSV</h3>
+    <form id="uploadForm" method="post" action="/ingest/grants_csv" enctype="multipart/form-data">
+      <input type="file" name="file" required />
+      <input type="hidden" name="source_name" value="grants_export"/>
+      <button type="submit">Upload</button>
+    </form>
+    <div id="uploadResult" class="muted"></div>
+  </section>
+
+  <section>
+    <h3>2) Rebuild Embeddings</h3>
+    <button onclick="post('/match/reindex')">Reindex</button>
+    <pre id="reindexOut" class="muted"></pre>
+  </section>
+
+  <section>
+    <h3>3) Run Web Scrapers (optional)</h3>
+    <button onclick="post('/ingest/run?source=pcori')">PCORI</button>
+    <button onclick="post('/ingest/run?source=rwjf')">RWJF</button>
+    <button onclick="post('/ingest/run?source=gates')">Gates</button>
+    <button onclick="post('/ingest/run?source=dod_sbir')">DoD SBIR/STTR</button>
+    <pre id="scrapeOut" class="muted"></pre>
+  </section>
+
+  <section>
+    <h3>4) Utilities</h3>
+    <button onclick="fetch('/opportunities?limit=1').then(r=>r.json()).then(j=>out('utilsOut', j))">Count Opportunities</button>
+    <a href="/match/form" style="margin-left:8px">Open Matcher Form →</a>
+    <pre id="utilsOut" class="muted"></pre>
+  </section>
+
+<script>
+async function post(url) {
+  const r = await fetch(url, {method:'POST'});
+  const j = await r.json().catch(()=>({status:r.status}));
+  if (url.includes('reindex')) out('reindexOut', j);
+  else if (url.includes('ingest/run')) out('scrapeOut', j);
+}
+function out(id, obj){ document.getElementById(id).textContent = JSON.stringify(obj,null,2); }
+const up = document.getElementById('uploadForm');
+up && up.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const fd = new FormData(up);
+  const r = await fetch('/ingest/grants_csv', {method:'POST', body:fd});
+  const j = await r.json().catch(()=>({status:r.status}));
+  document.getElementById('uploadResult').textContent = JSON.stringify(j,null,2);
+});
+</script>
+</body>
+</html>
+"""
