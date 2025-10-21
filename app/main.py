@@ -112,7 +112,7 @@ def ingest_csv(
     source_name: str = Form(...),   # "nih_export" or "nsf_export"
     file: UploadFile = File(...)
 ):
-    from .ingest.base import _coerce_to_opportunity  # reuse your helper
+    from ingest.base import _coerce_to_opportunity  # reuse your helper
 
     s = SessionLocal()
     try:
@@ -232,7 +232,7 @@ def ingest_grants_csv(
     Ingest a Grants.gov CSV export (single file) and normalize rows into opportunities.
     We build a details URL as: https://www.grants.gov/search-results-detail/<opportunity_id>
     """
-    from .ingest.base import _coerce_to_opportunity
+    from ingest.base import _coerce_to_opportunity
 
     s = SessionLocal()
     try:
@@ -623,17 +623,27 @@ def match_table(profile_text: str = "", top_k: int = 20):
         s.close()
 
 
-@app.post("/reset")
-def reset_opportunities():
+@app.post("/admin/reset")
+def reset_database():
+    """Delete all opportunities and embedding index files."""
+    from .db import SessionLocal
+    from .models import Opportunity
+
+    # Paths must match vectorstore.py
+    DATA_DIR = os.path.abspath(os.path.join(os.getcwd(), "data"))
+    VECS_FILE = os.path.join(DATA_DIR, "opps_vecs.npy")
+    IDS_FILE  = os.path.join(DATA_DIR, "opps_ids.json")
+
+    # 1️⃣ Clear database
     s = SessionLocal()
     try:
-        from .models import Opportunity
         s.query(Opportunity).delete()
         s.commit()
-        return {"status": "cleared"}
     finally:
         s.close()
 
+
+from fastapi.responses import HTMLResponse
 
 from fastapi.responses import HTMLResponse
 
@@ -649,7 +659,7 @@ def admin_page():
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; max-width: 900px; }
     h1 { margin-bottom: 8px; }
     section { margin: 24px 0; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 8px 12px; }
+    button { padding: 8px 12px; cursor: pointer; }
     .muted { color:#666; font-size: 12px; }
     pre { background:#f7f7f7; padding:8px; overflow:auto; }
   </style>
@@ -686,6 +696,9 @@ def admin_page():
     <h3>4) Utilities</h3>
     <button onclick="fetch('/opportunities?limit=1').then(r=>r.json()).then(j=>out('utilsOut', j))">Count Opportunities</button>
     <a href="/match/form" style="margin-left:8px">Open Matcher Form →</a>
+    <div style="margin-top:10px"></div>
+    <button style="background:#ffe8e8;border:1px solid #f5bdbd" onclick="confirmReset()">⚠ Reset DB (delete all)</button>
+    <pre id="resetOut" class="muted"></pre>
     <pre id="utilsOut" class="muted"></pre>
   </section>
 
@@ -695,8 +708,11 @@ async function post(url) {
   const j = await r.json().catch(()=>({status:r.status}));
   if (url.includes('reindex')) out('reindexOut', j);
   else if (url.includes('ingest/run')) out('scrapeOut', j);
+  else if (url.includes('/admin/reset')) out('resetOut', j);
 }
+
 function out(id, obj){ document.getElementById(id).textContent = JSON.stringify(obj,null,2); }
+
 const up = document.getElementById('uploadForm');
 up && up.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -705,6 +721,11 @@ up && up.addEventListener('submit', async (e)=>{
   const j = await r.json().catch(()=>({status:r.status}));
   document.getElementById('uploadResult').textContent = JSON.stringify(j,null,2);
 });
+
+async function confirmReset(){
+  if (!confirm('This will delete ALL ingested opportunities and clear the vector index. Continue?')) return;
+  await post('/admin/reset');
+}
 </script>
 </body>
 </html>

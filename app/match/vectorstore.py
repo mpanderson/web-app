@@ -7,7 +7,8 @@ from models import Opportunity
 from settings import settings
 from utils.text import clean_text
 
-DATA_DIR = "/app/data"
+# Use path relative to the app directory
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 VECS_FILE = os.path.join(DATA_DIR, "opps_vecs.npy")
 IDS_FILE  = os.path.join(DATA_DIR, "opps_ids.json")
 
