@@ -61,6 +61,16 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Large data files
+*.npy
+*.pkl
+*.pickle
+
+# Temporary and log directories
+/tmp/
+logs/
+*.log
+
 # Flask stuff:
 instance/
 .webassets-cache

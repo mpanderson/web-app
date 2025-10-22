@@ -1,0 +1,83 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Replit-specific Python libraries and cache (VERY LARGE)
+.pythonlibs/
+.cache/
+.local/
+.config/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.hypothesis/
+htmlcov/
+.tox/
+.nox/
+cover/
+
+# Development files
+.git/
+.gitignore
+*.md
+LICENSE
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# Data files (use sample data in production)
+app/data/*.npy
+app/data/*.json
+data/
+
+# Sample and test data
+app/sample_data/
+
+# Database files (use production DB)
+*.sqlite3
+*.db
+
+# Documentation
+docs/
+README.md
+replit.md
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Temporary files
+.cache/
+tmp/
+temp/
+
+# Replit specific
+.replit
+replit.nix
+
+# Git history
+.git/
+.gitignore
+.gitattributes
