@@ -19,25 +19,42 @@ def run_all_ingestions():
     """
     Run all registered ingestion sources and reindex the vector store.
     This function is called by the scheduler at scheduled times.
+    
+    For each source, we:
+    1. Delete all existing opportunities from that source
+    2. Re-ingest fresh data
+    3. This prevents stale/closed opportunities from lingering
     """
+    from models import Opportunity
+    
     logger.info("=" * 60)
     logger.info(f"🕐 Starting scheduled ingestion at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
     
     session = SessionLocal()
     total_ingested = 0
+    total_deleted = 0
     
     try:
         # Run all registered ingestors
         for source_name, ingestor_class in REGISTRY.items():
             try:
+                # Clear existing opportunities from this source before re-ingesting
+                logger.info(f"🗑️  Clearing old {source_name} opportunities...")
+                deleted_count = session.query(Opportunity).filter_by(source=source_name).delete()
+                session.commit()
+                total_deleted += deleted_count
+                logger.info(f"🗑️  Deleted {deleted_count} old {source_name} opportunities")
+                
+                # Ingest fresh data
                 logger.info(f"📥 Running {source_name} ingestor...")
                 ingestor = ingestor_class(session)
                 count = ingestor.run()
                 total_ingested += count
-                logger.info(f"✅ {source_name}: ingested {count} opportunities")
+                logger.info(f"✅ {source_name}: ingested {count} new opportunities")
             except Exception as e:
                 logger.error(f"❌ {source_name} failed: {e}")
+                session.rollback()
                 # Continue with other sources even if one fails
                 continue
         
@@ -47,7 +64,9 @@ def run_all_ingestions():
         logger.info(f"✅ Reindexed {indexed_count} opportunities")
         
         logger.info("=" * 60)
-        logger.info(f"✅ Scheduled ingestion complete! Total: {total_ingested} opportunities")
+        logger.info(f"✅ Scheduled ingestion complete!")
+        logger.info(f"   Deleted: {total_deleted} old opportunities")
+        logger.info(f"   Ingested: {total_ingested} new opportunities")
         logger.info("=" * 60)
         
     except Exception as e:

@@ -75,10 +75,13 @@ Preferred communication style: Simple, everyday language.
 **Solution:** APScheduler background scheduler with twice-daily automated ingestion  
 **Schedule:** Runs at 12:00 PM (noon) and 8:00 PM daily (America/New_York timezone)  
 **Behavior:** 
+- For each source, deletes old opportunities before re-ingesting fresh data
+- This prevents stale/closed opportunities from lingering in the database
 - Automatically ingests from all registered sources (PCORI, Gates, RWJF, DoD SBIR, Grants.gov)
 - Reindexes vector embeddings after ingestion for semantic search
 - Runs in background without blocking the API
 - Can be monitored via `/scheduler/status` endpoint
+- If one source fails, others continue to run independently
 
 **Grants.gov Integration:**
 - Uses the official Simpler.Grants.gov API (no manual CSV export needed)
