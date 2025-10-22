@@ -26,3 +26,4 @@ sqlalchemy==2.0.35
 uvicorn[standard]==0.30.6
 playwright
 requests-html
+lxml_html_clean
