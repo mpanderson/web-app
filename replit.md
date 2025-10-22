@@ -94,7 +94,7 @@ Preferred communication style: Simple, everyday language.
 - Uses the official SAM.gov Opportunities API v2 for federal contracting opportunities
 - Requires free API key from https://sam.gov (stored as SAM_GOV_API_KEY secret)
 - Fetches all federal SBIR/STTR opportunities from multiple agencies (DoD, NIH, NSF, DOE, etc.)
-- Queries 90-day rolling window (SAM.gov API requirement for date ranges)
+- Queries 150-day window: 90 days past to 60 days future (captures both active opportunities and pre-release notices)
 - Filters ~16,000+ federal opportunities to extract SBIR/STTR programs
 - Handles pagination and includes retry logic for reliability
 - Captures opportunities with full metadata (solicitation number, agency, deadlines, links)

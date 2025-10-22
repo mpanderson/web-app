@@ -74,12 +74,14 @@ class DodSbirIngestor(BaseIngestor):
         
         all_opportunities = []
         
-        # SAM.gov requires date ranges and recommends 30-90 day windows
-        # Query the last 90 days for SBIR/STTR opportunities
+        # SAM.gov requires date ranges
+        # Query from 90 days ago to 60 days in the future to capture:
+        # - Historical active opportunities
+        # - Pre-release notices for upcoming opportunities (up to 2 months ahead)
         posted_from = (datetime.now() - timedelta(days=90)).strftime("%m/%d/%Y")
-        posted_to = datetime.now().strftime("%m/%d/%Y")
+        posted_to = (datetime.now() + timedelta(days=60)).strftime("%m/%d/%Y")
         
-        print(f"  Date range: {posted_from} to {posted_to}")
+        print(f"  Date range: {posted_from} to {posted_to} (includes pre-release notices)")
         
         # Fetch in batches with pagination
         limit = 100
