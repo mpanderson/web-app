@@ -36,6 +36,10 @@ waitForPort = 5000
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 39165
+externalPort = 3000
+
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "gce"
 run = ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
