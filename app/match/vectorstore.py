@@ -42,9 +42,19 @@ def _embed_openai(texts: List[str]) -> np.ndarray:
     if not settings.OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set but EMBEDDINGS_BACKEND=openai.")
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    # Batch once; for very large corpora you may want to chunk
-    resp = client.embeddings.create(model="text-embedding-3-small", input=texts)
-    arr = np.array([d.embedding for d in resp.data], dtype="float32")
+    
+    # Batch to handle large datasets (OpenAI limit: 300k tokens per request)
+    # Using batch size of 100 texts (~2k tokens each on average = 200k tokens)
+    batch_size = 100
+    all_embeddings = []
+    
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        resp = client.embeddings.create(model="text-embedding-3-small", input=batch)
+        batch_embeddings = [d.embedding for d in resp.data]
+        all_embeddings.extend(batch_embeddings)
+    
+    arr = np.array(all_embeddings, dtype="float32")
     # L2-normalize for cosine via dot product
     norms = np.linalg.norm(arr, axis=1, keepdims=True) + 1e-8
     return arr / norms
