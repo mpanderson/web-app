@@ -50,17 +50,21 @@ Preferred communication style: Simple, everyday language.
 **Solution:** Vector embeddings with cosine similarity search  
 
 **Embedding Strategy:**
-- Configurable backend (local SentenceTransformers or OpenAI embeddings)
-- Local default: `sentence-transformers/all-MiniLM-L6-v2`
-- OpenAI option: `text-embedding-3-small`
+- **Production deployment:** OpenAI embeddings (`text-embedding-3-small`) for lightweight deployment
+- Requires OPENAI_API_KEY environment variable
 - Embeddings stored as numpy arrays on disk for fast retrieval
+- Vector dimension: 1536 (OpenAI embedding size)
 
-**Pros:** Semantic understanding captures meaning beyond keywords; configurable backends allow cost/quality tradeoffs  
-**Cons:** Requires reindexing when opportunities change; local models have lower quality than commercial APIs
+**Rationale:** OpenAI embeddings chosen for production to minimize deployment image size (<100 MB vs 8+ GB for local PyTorch models). The cloud-based approach aligns with the MVP's twice-daily scheduled ingestion workflow, providing high-quality semantic matching without bundling large ML models.
+
+**Pros:** High-quality semantic understanding; minimal deployment footprint; no local GPU/CPU ML dependencies  
+**Cons:** Requires OpenAI API quota; small per-request cost; requires reindexing when opportunities change
 
 **Storage:** Embeddings stored in `/data` directory as:
 - `opps_vecs.npy` - numpy array of vectors
 - `opps_ids.json` - mapping to opportunity IDs
+
+**Future Option:** For offline/on-premise deployments requiring local inference, the codebase supports sentence-transformers as an alternative backend (requires Reserved VM deployment type due to image size constraints).
 
 ### LLM Reranking (Optional)
 **Problem:** Vector similarity alone may miss nuanced fit criteria (eligibility, deadlines, mechanism constraints)  
@@ -148,12 +152,11 @@ Preferred communication style: Simple, everyday language.
 - **BeautifulSoup4** (4.12.3) - HTML parsing
 - **lxml** (5.3.0) - XML/HTML parser backend
 - **lxml_html_clean** - HTML sanitization
-- **Playwright** - Browser automation for JavaScript-heavy sites
-- **requests-html** - Requests wrapper with JavaScript rendering
 
 ### Machine Learning & Embeddings
-- **sentence-transformers** (3.1.1) - Local embedding models
-- **OpenAI API** (optional) - Cloud-based embeddings and LLM reranking via `text-embedding-3-small` and `gpt-4o-mini`
+- **OpenAI API** (1.54.0) - Cloud-based embeddings and LLM reranking via `text-embedding-3-small` and `gpt-4o-mini`
+  - Used for production deployment to minimize image size
+  - Requires OPENAI_API_KEY environment variable
 
 ### Scheduling & Task Queue
 - **APScheduler** (3.11.0) - Background job scheduling for automated twice-daily ingestion
@@ -169,8 +172,9 @@ Preferred communication style: Simple, everyday language.
 ### Configuration
 All external service connections are configured via environment variables or `.env` file:
 - `DATABASE_URL` - Database connection (defaults to SQLite)
-- `EMBEDDINGS_BACKEND` - "local" or "openai"
-- `OPENAI_API_KEY` - For OpenAI embeddings/reranking
+- `EMBEDDINGS_BACKEND` - Defaults to "openai" for production deployment
+- `OPENAI_API_KEY` - **Required** for OpenAI embeddings and LLM reranking
 - `GRANTS_GOV_API_KEY` - Simpler.Grants.gov API key for automated federal grant ingestion
+- `SAM_GOV_API_KEY` - SAM.gov API key for SBIR/STTR opportunities
 - `redis_url` - Redis connection for Celery (external service)
 - `OFFLINE_DEMO` - Flag to use sample data instead of live sources
