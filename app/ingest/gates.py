@@ -4,6 +4,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 from .base import BaseIngestor
+from models import Opportunity
 
 HEADERS = {"User-Agent": "RFA-Matcher/1.0 (contact: you@example.org)"}
 BASE = "https://usprogram.gatesfoundation.org"
@@ -54,7 +55,7 @@ class GatesIngestor(BaseIngestor):
                 "close_date": close,
             }
 
-    def normalize(self, raw: dict):
+    def normalize(self, raw: dict) -> dict:
         url = raw.get("landing")
         title = raw.get("title") or "(Untitled)"
         return {

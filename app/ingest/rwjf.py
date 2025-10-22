@@ -72,7 +72,7 @@ class RwjfIngestor(BaseIngestor):
                 "close_date": close,
             }
 
-    def normalize(self, raw: dict) -> Opportunity:
+    def normalize(self, raw: dict) -> dict:
         title = raw.get("title") or "(Untitled)"
         url = raw.get("landing")
         return {
