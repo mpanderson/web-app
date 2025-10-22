@@ -37,4 +37,5 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "autoscale"
+run = ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
