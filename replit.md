@@ -37,7 +37,7 @@ Preferred communication style: Simple, everyday language.
 - PCORI (web scraping)
 - Robert Wood Johnson Foundation (RWJF) (web scraping)
 - Gates Foundation (web scraping)
-- DoD SBIR (API with retry logic and caching)
+- **DoD SBIR/STTR (SAM.gov Opportunities API v2)** - Federal SBIR/STTR contracting opportunities
 - **Grants.gov (Simpler.Grants.gov API)** - Automated federal grant ingestion
 - NIH Guide (RSS + web scraping) - commented out
 - NSF (RSS) - commented out
@@ -89,6 +89,15 @@ Preferred communication style: Simple, everyday language.
 - Fetches all forecasted and posted federal grant opportunities
 - Handles pagination automatically to retrieve complete dataset (typically 1,500+ opportunities)
 - Includes retry logic and rate limiting for reliability
+
+**SAM.gov Integration (SBIR/STTR):**
+- Uses the official SAM.gov Opportunities API v2 for federal contracting opportunities
+- Requires free API key from https://sam.gov (stored as SAM_GOV_API_KEY secret)
+- Fetches all federal SBIR/STTR opportunities from multiple agencies (DoD, NIH, NSF, DOE, etc.)
+- Queries 90-day rolling window (SAM.gov API requirement for date ranges)
+- Filters ~16,000+ federal opportunities to extract SBIR/STTR programs
+- Handles pagination and includes retry logic for reliability
+- Captures opportunities with full metadata (solicitation number, agency, deadlines, links)
 
 **Implementation:** Uses APScheduler's BackgroundScheduler with cron triggers. Scheduler starts automatically when the FastAPI app starts and shuts down cleanly on app termination.
 
