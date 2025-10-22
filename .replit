@@ -6,7 +6,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales", "libxcrypt", "xcodebuild", "zlib"]
+packages = ["gitFull", "glibcLocales", "libxcrypt", "playwright-driver", "xcodebuild", "zlib"]
 
 [workflows]
 runButton = "Project"
