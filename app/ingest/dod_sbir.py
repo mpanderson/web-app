@@ -74,15 +74,17 @@ class DodSbirIngestor(BaseIngestor):
         
         all_opportunities = []
         
-        # Search for both SBIR and STTR opportunities
-        # We'll search for opportunities posted in the last year
-        posted_from = (datetime.now() - timedelta(days=365)).strftime("%m/%d/%Y")
+        # SAM.gov requires date ranges and recommends 30-90 day windows
+        # Query the last 90 days for SBIR/STTR opportunities
+        posted_from = (datetime.now() - timedelta(days=90)).strftime("%m/%d/%Y")
         posted_to = datetime.now().strftime("%m/%d/%Y")
+        
+        print(f"  Date range: {posted_from} to {posted_to}")
         
         # Fetch in batches with pagination
         limit = 100
         offset = 0
-        max_pages = 10  # Safety limit
+        max_pages = 20  # Fetch up to 2000 opportunities to find SBIR/STTR
         
         for page in range(max_pages):
             params = {
@@ -98,7 +100,15 @@ class DodSbirIngestor(BaseIngestor):
                 print(f"  Fetching page {page + 1} (offset {offset})...")
                 r = requests.get(SAM_GOV_API_URL, params=params, headers=HEADERS, timeout=40)
                 
-                if r.status_code == 403:
+                if r.status_code == 400:
+                    print(f"❌ Bad Request (400). Error details:")
+                    try:
+                        error_data = r.json()
+                        print(f"   {error_data}")
+                    except:
+                        print(f"   {r.text[:500]}")
+                    return all_opportunities
+                elif r.status_code == 403:
                     print(f"❌ API authentication failed (403). Check your SAM_GOV_API_KEY")
                     return all_opportunities
                 elif r.status_code == 429:
