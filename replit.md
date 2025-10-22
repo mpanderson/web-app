@@ -37,9 +37,9 @@ Preferred communication style: Simple, everyday language.
 - PCORI (web scraping)
 - Robert Wood Johnson Foundation (RWJF) (web scraping)
 - Gates Foundation (web scraping)
-- DoD SBIR (API + web scraping)
+- DoD SBIR (API with retry logic and caching)
+- **Grants.gov (Simpler.Grants.gov API)** - Automated federal grant ingestion
 - NIH Guide (RSS + web scraping) - commented out
-- Grants.gov (API) - commented out
 - NSF (RSS) - commented out
 - DARPA (RSS) - commented out
 
@@ -75,10 +75,17 @@ Preferred communication style: Simple, everyday language.
 **Solution:** APScheduler background scheduler with twice-daily automated ingestion  
 **Schedule:** Runs at 12:00 PM (noon) and 8:00 PM daily (America/New_York timezone)  
 **Behavior:** 
-- Automatically ingests from all registered sources (PCORI, Gates, RWJF, DoD SBIR)
+- Automatically ingests from all registered sources (PCORI, Gates, RWJF, DoD SBIR, Grants.gov)
 - Reindexes vector embeddings after ingestion for semantic search
 - Runs in background without blocking the API
 - Can be monitored via `/scheduler/status` endpoint
+
+**Grants.gov Integration:**
+- Uses the official Simpler.Grants.gov API (no manual CSV export needed)
+- Requires free API key from https://simpler.grants.gov/ (stored as GRANTS_GOV_API_KEY secret)
+- Fetches all forecasted and posted federal grant opportunities
+- Handles pagination automatically to retrieve complete dataset (typically 1,500+ opportunities)
+- Includes retry logic and rate limiting for reliability
 
 **Implementation:** Uses APScheduler's BackgroundScheduler with cron triggers. Scheduler starts automatically when the FastAPI app starts and shuts down cleanly on app termination.
 
@@ -152,5 +159,6 @@ All external service connections are configured via environment variables or `.e
 - `DATABASE_URL` - Database connection (defaults to SQLite)
 - `EMBEDDINGS_BACKEND` - "local" or "openai"
 - `OPENAI_API_KEY` - For OpenAI embeddings/reranking
+- `GRANTS_GOV_API_KEY` - Simpler.Grants.gov API key for automated federal grant ingestion
 - `redis_url` - Redis connection for Celery (external service)
 - `OFFLINE_DEMO` - Flag to use sample data instead of live sources
