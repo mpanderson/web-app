@@ -21,6 +21,7 @@ from ingest import REGISTRY
 from match.profile import extract_profile_text
 from match.matcher import match_opportunities
 from match.vectorstore import reindex
+from scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 
 # (LLM re-rank – safely falls back if quota/key is missing)
 from rerank.explainer import llm_rerank, RerankItem
@@ -29,11 +30,18 @@ from rerank.explainer import llm_rerank, RerankItem
 app = FastAPI(title="RFA Matcher MVP")
 
 
-# ---------- Startup ----------
+# ---------- Startup / Shutdown ----------
 
 @app.on_event("startup")
 def startup():
     init_db_main()
+    # Start the background scheduler for twice-daily ingestion
+    start_scheduler()
+
+@app.on_event("shutdown")
+def shutdown():
+    # Clean up scheduler on app shutdown
+    stop_scheduler()
 
 
 # ---------- Utilities ----------
@@ -88,6 +96,14 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------- Scheduler Status ----------
+
+@app.get("/scheduler/status")
+def scheduler_status():
+    """Get the current scheduler status and upcoming jobs."""
+    return get_scheduler_status()
 
 
 # ---------- Browse ----------
