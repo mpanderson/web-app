@@ -67,176 +67,27 @@ def _hash3(a, b, c):
     return h.hexdigest()
 
 
-# ---------- Health ----------
+# ---------- Root / Health ----------
+
+@app.get("/")
+def root():
+    """Root endpoint with API information."""
+    return {
+        "name": "RFA Matcher MVP",
+        "version": "1.0",
+        "endpoints": {
+            "health": "/health",
+            "browse_opportunities": "/opportunities",
+            "ingest_source": "/ingest/run?source={pcori|gates|rwjf|dod_sbir}",
+            "match_profile": "/match (POST)",
+            "reindex": "/match/reindex (POST)",
+            "api_docs": "/docs"
+        }
+    }
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# ---------- CSV Upload Page ----------
-
-@app.get("/upload", response_class=HTMLResponse)
-def upload_page():
-    """Simple HTML page for uploading DoD SBIR/STTR CSV files."""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>DoD SBIR/STTR CSV Upload</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                max-width: 800px;
-                margin: 50px auto;
-                padding: 20px;
-                background-color: #f5f5f5;
-            }
-            .container {
-                background-color: white;
-                padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            h1 {
-                color: #333;
-            }
-            .instructions {
-                background-color: #e3f2fd;
-                padding: 15px;
-                border-left: 4px solid #2196F3;
-                margin: 20px 0;
-            }
-            .instructions ol {
-                margin: 10px 0;
-                padding-left: 20px;
-            }
-            .form-group {
-                margin: 20px 0;
-            }
-            input[type="file"] {
-                padding: 10px;
-                border: 2px dashed #ccc;
-                border-radius: 4px;
-                width: 100%;
-                cursor: pointer;
-            }
-            button {
-                background-color: #4CAF50;
-                color: white;
-                padding: 12px 30px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 16px;
-            }
-            button:hover {
-                background-color: #45a049;
-            }
-            button:disabled {
-                background-color: #ccc;
-                cursor: not-allowed;
-            }
-            .result {
-                margin-top: 20px;
-                padding: 15px;
-                border-radius: 4px;
-                display: none;
-            }
-            .success {
-                background-color: #d4edda;
-                border: 1px solid #c3e6cb;
-                color: #155724;
-            }
-            .error {
-                background-color: #f8d7da;
-                border: 1px solid #f5c6cb;
-                color: #721c24;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>📄 DoD SBIR/STTR CSV Upload</h1>
-            
-            <div class="instructions">
-                <h3>How to download the CSV:</h3>
-                <ol>
-                    <li>Go to <a href="https://www.dodsbirsttr.mil/topics-app/" target="_blank">DoD SBIR/STTR Topics App</a></li>
-                    <li>The page shows a table with all active topics (including Pre-Release)</li>
-                    <li>Look for an <strong>Export</strong> or <strong>Download CSV</strong> button (usually near the top or bottom of the table)</li>
-                    <li>If no export button is visible, you can manually select and copy the table, then paste into Excel and save as CSV</li>
-                    <li>Upload the CSV file below</li>
-                </ol>
-            </div>
-            
-            <form id="uploadForm">
-                <div class="form-group">
-                    <label for="csvFile"><strong>Select CSV file:</strong></label><br><br>
-                    <input type="file" id="csvFile" name="file" accept=".csv" required>
-                </div>
-                
-                <button type="submit" id="uploadBtn">Upload and Ingest Topics</button>
-            </form>
-            
-            <div id="result" class="result"></div>
-        </div>
-        
-        <script>
-            document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                
-                const fileInput = document.getElementById('csvFile');
-                const button = document.getElementById('uploadBtn');
-                const result = document.getElementById('result');
-                
-                if (!fileInput.files.length) {
-                    alert('Please select a CSV file');
-                    return;
-                }
-                
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
-                
-                button.disabled = true;
-                button.textContent = 'Uploading...';
-                result.style.display = 'none';
-                
-                try {
-                    const response = await fetch('/ingest/dod_sbir_csv', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (response.ok) {
-                        result.className = 'result success';
-                        result.innerHTML = `
-                            <strong>✅ Success!</strong><br>
-                            ${data.message}<br>
-                            <strong>Ingested:</strong> ${data.ingested} topics<br>
-                            <a href="/opportunities">View all opportunities</a>
-                        `;
-                    } else {
-                        throw new Error(data.detail || 'Upload failed');
-                    }
-                } catch (error) {
-                    result.className = 'result error';
-                    result.innerHTML = `
-                        <strong>❌ Error:</strong><br>
-                        ${error.message}
-                    `;
-                } finally {
-                    result.style.display = 'block';
-                    button.disabled = false;
-                    button.textContent = 'Upload and Ingest Topics';
-                }
-            });
-        </script>
-    </body>
-    </html>
-    """
 
 
 # ---------- Browse ----------
@@ -387,39 +238,6 @@ def ingest_csv(
         s.close()
 
 
-# DoD SBIR/STTR CSV Upload
-@app.post("/ingest/dod_sbir_csv")
-def ingest_dod_sbir_csv(file: UploadFile = File(...)):
-    """
-    Upload a CSV export from DoD SBIR/STTR topics app.
-    Expected columns: Topic #, Title, Open, Close, Component, Status, etc.
-    """
-    from ingest.dod_sbir_csv import DodSbirCsvIngestor
-    
-    s = SessionLocal()
-    try:
-        # Read CSV content
-        raw = file.file.read()
-        csv_content = raw.decode("utf-8")
-        
-        # Use CSV ingestor
-        ingestor = DodSbirCsvIngestor(s, csv_content)
-        count = ingestor.run()
-        
-        # Reindex for search
-        reindex(s)
-        
-        return {
-            "ingested": count,
-            "source": "dod_sbir",
-            "message": f"Successfully ingested {count} DoD SBIR/STTR topics"
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Failed to process CSV: {str(e)}")
-    finally:
-        s.close()
-
-
 # Grants.gov export (your new workflow)
 @app.post("/ingest/grants_csv")
 def ingest_grants_csv(
@@ -531,7 +349,7 @@ async def match(
     # Save uploaded file to temp if provided
     tmp_path = None
     if profile_file:
-        suffix = os.path.splitext(profile_file.filename)[-1] or ".bin"
+        suffix = os.path.splitext(profile_file.filename or "")[-1] or ".bin"
         fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         os.close(fd)
         with open(tmp_path, "wb") as f:

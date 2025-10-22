@@ -1,23 +1,20 @@
 # app/ingest/dod_sbir.py
-import os, time, re, json, hashlib
-from datetime import datetime, timedelta
+import time, hashlib
+from datetime import datetime
 from typing import Iterable, Any
-from concurrent.futures import ThreadPoolExecutor
 import requests
-from bs4 import BeautifulSoup
 
 from .base import BaseIngestor
-from models import Opportunity
 
-HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: you@example.org)"}
+HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: research@example.org)"}
 
 # Official SBIR.gov API endpoint for DoD topics
 SBIR_API_URL = "https://api.www.sbir.gov/public/api/solicitations"
 
-# DoD Topics App
+# DoD Topics App URL for fallback links
 TOPICS_APP_URL = "https://www.dodsbirsttr.mil/topics-app/"
 
-# Simple in-memory cache to avoid rate limiting
+# Simple in-memory cache to avoid hitting API repeatedly
 _cache = {"data": None, "timestamp": None, "ttl_seconds": 300}  # 5 min cache
 
 def _hash(title: str | None, url: str | None) -> str:
@@ -56,96 +53,10 @@ def _component_to_agency(component: str | None) -> str:
         return "DoD SBIR/STTR"
     return f"DoD SBIR/STTR - {component}"
 
-def _run_playwright_in_thread() -> list[dict]:
-    """
-    Run Playwright in a separate thread to avoid event loop conflicts.
-    This is necessary because FastAPI uses AnyIO/uvicorn async context.
-    """
-    from playwright.sync_api import sync_playwright
-    
-    topics = []
-    
-    try:
-        print("Starting Playwright browser automation...")
-        with sync_playwright() as p:
-            # Launch browser in headless mode
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
-            page = browser.new_page()
-            
-            # Navigate to the DoD topics app
-            print(f"Navigating to {TOPICS_APP_URL}")
-            page.goto(TOPICS_APP_URL, wait_until="networkidle", timeout=60000)
-            
-            # Wait for the table to load (adjust selector as needed)
-            page.wait_for_selector('table, [class*="topic"], tr', timeout=30000)
-            
-            # Wait a bit more for JavaScript to finish rendering
-            page.wait_for_timeout(3000)
-            
-            # Get the rendered HTML
-            html = page.content()
-            browser.close()
-            
-            print(f"Page rendered successfully, parsing HTML ({len(html)} chars)")
-            
-            # Parse with BeautifulSoup
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Find all table rows
-            rows = soup.select('tr')
-            print(f"Found {len(rows)} table rows")
-            
-            for row in rows:
-                text = row.get_text(' ', strip=True)
-                
-                # Look for topic number pattern (e.g., A254-049, CBD254-005)
-                topic_match = re.search(r'([A-Z]+\d+-[A-Z]?\d+)', text)
-                
-                if not topic_match:
-                    continue
-                    
-                number = topic_match.group(1)
-                
-                # Extract title (text before dates or status)
-                title_match = re.search(r'([A-Z][^0-9\n]{20,}?)(?:\d{2}/\d{2}/\d{4}|Pre-Release|Open)', text)
-                title = title_match.group(1).strip() if title_match else text[:150]
-                
-                # Extract dates
-                dates = re.findall(r'(\d{2}/\d{2}/\d{4})', text)
-                open_date = _to_date(dates[0]) if len(dates) > 0 else None
-                close_date = _to_date(dates[1]) if len(dates) > 1 else None
-                
-                # Check status
-                status = "Pre-Release" if "Pre-Release" in text else ("Open" if "Open" in text else None)
-                
-                # Extract component
-                comp_match = re.search(r'\b(ARMY|NAVY|AIR FORCE|CBD|DARPA|MDA|SOCOM|OSD|DTRA)\b', text, re.IGNORECASE)
-                component = comp_match.group(1).upper() if comp_match else None
-                
-                topics.append({
-                    "topic_number": number,
-                    "topic_title": title,
-                    "topic_description": None,
-                    "branch": component,
-                    "program": None,
-                    "release_date": open_date,
-                    "close_date": close_date,
-                    "status": status,
-                })
-            
-            print(f"Extracted {len(topics)} topics from rendered page")
-            return topics
-            
-    except Exception as e:
-        print(f"Playwright automation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-
 class DodSbirIngestor(BaseIngestor):
     """
-    Ingestor for DoD SBIR/STTR topics using Playwright browser automation.
-    This captures both pre-release and open announcements from the SPA.
+    Ingestor for DoD SBIR/STTR topics using the SBIR.gov API.
+    Includes retry logic with exponential backoff for rate limiting.
     """
     source = "dod_sbir"
 
@@ -163,56 +74,45 @@ class DodSbirIngestor(BaseIngestor):
         _cache["data"] = data
         _cache["timestamp"] = datetime.now()
 
-    def _fetch_with_playwright(self) -> list[dict]:
-        """
-        Use Playwright in a separate thread to avoid event loop conflicts.
-        """
-        try:
-            # Run Playwright in a thread executor to avoid async context issues
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_run_playwright_in_thread)
-                topics = future.result(timeout=120)  # 2 minute timeout
-                
-            if topics:
-                self._save_cache(topics)
-                print(f"Successfully fetched {len(topics)} topics via Playwright")
-            return topics
-            
-        except Exception as e:
-            print(f"Playwright thread execution failed: {e}")
-            return []
-
     def _fetch_from_sbir_api(self) -> list[dict]:
         """
-        Try SBIR.gov API with retry/backoff for rate limiting.
+        Fetch from SBIR.gov API with retry/backoff for rate limiting.
+        If rate limited, waits progressively longer between retries.
         """
         topics = []
-        max_retries = 2
-        base_delay = 5
+        max_retries = 3
+        base_delay = 10  # Start with 10 seconds
         
         params = {
             "agency": "DOD",
-            "rows": 50,
+            "rows": 100,  # Fetch more rows to get pre-release + open topics
             "start": 0
         }
         
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    delay = base_delay * (2 ** attempt)
-                    print(f"Retrying SBIR.gov API after {delay}s...")
+                    # Exponential backoff: 10s, 20s, 40s
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"⏳ Waiting {delay}s before retry {attempt + 1}/{max_retries}...")
                     time.sleep(delay)
                 
+                print(f"Fetching DoD SBIR topics from SBIR.gov API (attempt {attempt + 1}/{max_retries})...")
                 r = requests.get(SBIR_API_URL, params=params, headers=HEADERS, timeout=40)
                 
                 if r.status_code == 429:
-                    print(f"SBIR.gov API rate limited (attempt {attempt + 1}/{max_retries})")
+                    print(f"⚠️  API rate limited (429). Will retry after backoff.")
+                    if attempt == max_retries - 1:
+                        print(f"❌ Rate limit persists after {max_retries} attempts. Try again later.")
                     continue
                     
                 r.raise_for_status()
                 data = r.json()
                 
-                solicitations = data if isinstance(data, list) else []
+                # Handle different response formats
+                solicitations = data.get("solicitations", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                
+                print(f"✅ Received {len(solicitations)} solicitations from API")
                 
                 for solicitation in solicitations:
                     sol_title = solicitation.get("solicitation_title") or solicitation.get("title")
@@ -220,13 +120,18 @@ class DodSbirIngestor(BaseIngestor):
                     program = solicitation.get("program")
                     release_date = solicitation.get("release_date") or solicitation.get("open_date")
                     close_date = solicitation.get("close_date") or solicitation.get("application_due_date")
-                    status = solicitation.get("current_status")
+                    status = solicitation.get("current_status") or solicitation.get("status")
                     
+                    # Extract topics from each solicitation
                     sol_topics = solicitation.get("solicitation_topics") or solicitation.get("topics") or []
+                    
+                    if not sol_topics:
+                        # If no topics array, treat the solicitation itself as a topic
+                        sol_topics = [solicitation]
                     
                     for topic in sol_topics:
                         topic_dict = {
-                            "topic_number": topic.get("topic_number"),
+                            "topic_number": topic.get("topic_number") or topic.get("topicNumber"),
                             "topic_title": topic.get("topic_title") or topic.get("title"),
                             "topic_description": topic.get("topic_description") or topic.get("description"),
                             "branch": topic.get("branch") or branch,
@@ -241,32 +146,39 @@ class DodSbirIngestor(BaseIngestor):
                 
                 if topics:
                     self._save_cache(topics)
-                    print(f"Fetched {len(topics)} topics from SBIR.gov API")
+                    print(f"✅ Successfully fetched {len(topics)} DoD SBIR/STTR topics")
+                else:
+                    print("⚠️  API returned no topics")
+                    
                 return topics
                     
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Network error on attempt {attempt + 1}: {e}")
+                if attempt == max_retries - 1:
+                    print(f"Failed to fetch DoD SBIR topics after {max_retries} attempts")
+                    break
             except Exception as e:
-                print(f"SBIR.gov API attempt {attempt + 1} failed: {e}")
+                print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
                     break
                     
         return []
 
     def fetch(self) -> Iterable[dict]:
-        # 1. Check cache first
+        """
+        Fetch DoD SBIR/STTR topics.
+        First checks cache, then tries SBIR.gov API with retry logic.
+        """
+        # 1. Check cache first to avoid unnecessary API calls
         cached = self._check_cache()
         if cached:
             topics = cached
         else:
-            # 2. Try Playwright browser automation (most reliable for pre-release topics)
-            topics = self._fetch_with_playwright()
-            
-            # 3. Fall back to SBIR.gov API if browser fails
-            if not topics:
-                print("Playwright returned no results, trying SBIR.gov API...")
-                topics = self._fetch_from_sbir_api()
+            # 2. Fetch from SBIR.gov API
+            topics = self._fetch_from_sbir_api()
         
         if not topics:
-            print("WARNING: No DoD SBIR topics found from any source")
+            print("⚠️  WARNING: No DoD SBIR topics found. Check API status or try again later.")
             return
 
         # Process and yield each topic
