@@ -70,12 +70,24 @@ Preferred communication style: Simple, everyday language.
 **Pros:** Provides nuanced scoring and human-readable explanations  
 **Cons:** Adds latency and cost; requires API quota management
 
+### Scheduled Ingestion
+**Problem:** Funding opportunities need to be refreshed regularly to stay current  
+**Solution:** APScheduler background scheduler with twice-daily automated ingestion  
+**Schedule:** Runs at 12:00 PM (noon) and 8:00 PM daily (America/New_York timezone)  
+**Behavior:** 
+- Automatically ingests from all registered sources (PCORI, Gates, RWJF, DoD SBIR)
+- Reindexes vector embeddings after ingestion for semantic search
+- Runs in background without blocking the API
+- Can be monitored via `/scheduler/status` endpoint
+
+**Implementation:** Uses APScheduler's BackgroundScheduler with cron triggers. Scheduler starts automatically when the FastAPI app starts and shuts down cleanly on app termination.
+
 ### Asynchronous Task Processing
 **Problem:** Data ingestion and reindexing are long-running operations  
-**Solution:** Celery task queue with Redis backend  
+**Solution:** Celery task queue with Redis backend (optional, not actively used)  
 **Configuration:** Tasks defined in `tasks.py` for ingesting individual sources or all sources, with automatic reindexing after completion
 
-**Note:** Celery infrastructure (Redis, worker) must be set up separately - not embedded in the application.
+**Note:** Celery infrastructure (Redis, worker) must be set up separately - not embedded in the application. The APScheduler solution provides built-in scheduling without external dependencies.
 
 ### Web Scraping Strategy
 **Problem:** Many funding sources don't provide APIs  
@@ -124,8 +136,9 @@ Preferred communication style: Simple, everyday language.
 - **sentence-transformers** (3.1.1) - Local embedding models
 - **OpenAI API** (optional) - Cloud-based embeddings and LLM reranking via `text-embedding-3-small` and `gpt-4o-mini`
 
-### Task Queue
-- **Celery** - Distributed task queue (configured but requires separate Redis instance)
+### Scheduling & Task Queue
+- **APScheduler** (3.11.0) - Background job scheduling for automated twice-daily ingestion
+- **Celery** - Distributed task queue (configured but not actively used)
 - **Redis** - Message broker and result backend (external dependency, configured via `settings.redis_url`)
 
 ### Additional Dependencies
