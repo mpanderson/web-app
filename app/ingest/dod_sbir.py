@@ -1,6 +1,8 @@
 # app/ingest/dod_sbir.py
-import time, hashlib
-from datetime import datetime
+import os
+import time
+import hashlib
+from datetime import datetime, timedelta
 from typing import Iterable, Any
 import requests
 
@@ -8,19 +10,13 @@ from .base import BaseIngestor
 
 HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: research@example.org)"}
 
-# Official SBIR.gov API endpoint for DoD topics
-SBIR_API_URL = "https://api.www.sbir.gov/public/api/solicitations"
+# SAM.gov Opportunities API v2 endpoint
+SAM_GOV_API_URL = "https://api.sam.gov/prod/opportunities/v2/search"
 
-# DoD Topics App URL for fallback links
-TOPICS_APP_URL = "https://www.dodsbirsttr.mil/topics-app/"
-
-# Simple in-memory cache to avoid hitting API repeatedly
-_cache = {"data": None, "timestamp": None, "ttl_seconds": 300}  # 5 min cache
-
-def _hash(title: str | None, url: str | None) -> str:
+def _hash(title: str | None, opp_id: str | None) -> str:
     h = hashlib.sha256()
     h.update((title or "").encode("utf-8", errors="ignore"))
-    h.update((url or "").encode("utf-8", errors="ignore"))
+    h.update((opp_id or "").encode("utf-8", errors="ignore"))
     return h.hexdigest()
 
 def _to_date(s: Any):
@@ -32,13 +28,21 @@ def _to_date(s: Any):
             return datetime.strptime(s, fmt).date()
         except Exception:
             continue
-    # catch ISO-like "2025-09-01T00:00:00Z"
+    # catch ISO-like "2025-09-01T00:00:00Z" or "20250901"
     try:
         return datetime.fromisoformat(s.replace("Z", "+00:00")).date()
     except Exception:
-        return None
+        pass
+    # Try YYYYMMDD format
+    try:
+        if len(s) == 8 and s.isdigit():
+            return datetime.strptime(s, "%Y%m%d").date()
+    except Exception:
+        pass
+    return None
 
 def _mechanism_from_text(*texts: str | None) -> str | None:
+    """Detect SBIR/STTR from text fields."""
     blob = " ".join([t or "" for t in texts]).upper()
     if "STTR" in blob and "SBIR" in blob:
         return "SBIR/STTR"
@@ -48,187 +52,186 @@ def _mechanism_from_text(*texts: str | None) -> str | None:
         return "SBIR"
     return None
 
-def _component_to_agency(component: str | None) -> str:
-    if not component:
-        return "DoD SBIR/STTR"
-    return f"DoD SBIR/STTR - {component}"
-
 class DodSbirIngestor(BaseIngestor):
     """
-    Ingestor for DoD SBIR/STTR topics using the SBIR.gov API.
-    Includes retry logic with exponential backoff for rate limiting.
+    Ingestor for DoD SBIR/STTR opportunities using the SAM.gov Opportunities API v2.
+    This also captures SBIR/STTR from other federal agencies (NIH, NSF, DOE, etc.).
     """
     source = "dod_sbir"
 
-    def _check_cache(self) -> list[dict] | None:
-        """Check if we have cached data that's still fresh."""
-        if _cache["data"] and _cache["timestamp"]:
-            age = (datetime.now() - _cache["timestamp"]).total_seconds()
-            if age < _cache["ttl_seconds"]:
-                print(f"Using cached DoD SBIR data ({int(age)}s old)")
-                return _cache["data"]
-        return None
-
-    def _save_cache(self, data: list[dict]):
-        """Save data to cache."""
-        _cache["data"] = data
-        _cache["timestamp"] = datetime.now()
-
-    def _fetch_from_sbir_api(self) -> list[dict]:
+    def _fetch_from_sam_gov(self) -> list[dict]:
         """
-        Fetch from SBIR.gov API with retry/backoff for rate limiting.
-        If rate limited, waits progressively longer between retries.
+        Fetch SBIR/STTR opportunities from SAM.gov API.
+        Searches for opportunities with 'SBIR' or 'STTR' in the title.
         """
-        topics = []
-        max_retries = 3
-        base_delay = 10  # Start with 10 seconds
+        api_key = os.getenv("SAM_GOV_API_KEY")
+        if not api_key:
+            print("❌ SAM_GOV_API_KEY not found in environment variables")
+            print("   Please add your SAM.gov API key to Replit Secrets")
+            return []
+
+        print("Fetching SBIR/STTR opportunities from SAM.gov API...")
         
-        params = {
-            "agency": "DOD",
-            "rows": 100,  # Fetch more rows to get pre-release + open topics
-            "start": 0
-        }
+        all_opportunities = []
         
-        for attempt in range(max_retries):
+        # Search for both SBIR and STTR opportunities
+        # We'll search for opportunities posted in the last year
+        posted_from = (datetime.now() - timedelta(days=365)).strftime("%m/%d/%Y")
+        posted_to = datetime.now().strftime("%m/%d/%Y")
+        
+        # Fetch in batches with pagination
+        limit = 100
+        offset = 0
+        max_pages = 10  # Safety limit
+        
+        for page in range(max_pages):
+            params = {
+                "api_key": api_key,
+                "limit": limit,
+                "offset": offset,
+                "postedFrom": posted_from,
+                "postedTo": posted_to,
+                "ptype": "o,s,k",  # Solicitation, Special Notice, Combined Synopsis
+            }
+            
             try:
-                if attempt > 0:
-                    # Exponential backoff: 10s, 20s, 40s
-                    delay = base_delay * (2 ** (attempt - 1))
-                    print(f"⏳ Waiting {delay}s before retry {attempt + 1}/{max_retries}...")
-                    time.sleep(delay)
+                print(f"  Fetching page {page + 1} (offset {offset})...")
+                r = requests.get(SAM_GOV_API_URL, params=params, headers=HEADERS, timeout=40)
                 
-                print(f"Fetching DoD SBIR topics from SBIR.gov API (attempt {attempt + 1}/{max_retries})...")
-                r = requests.get(SBIR_API_URL, params=params, headers=HEADERS, timeout=40)
-                
-                if r.status_code == 429:
-                    print(f"⚠️  API rate limited (429). Will retry after backoff.")
-                    if attempt == max_retries - 1:
-                        print(f"❌ Rate limit persists after {max_retries} attempts. Try again later.")
+                if r.status_code == 403:
+                    print(f"❌ API authentication failed (403). Check your SAM_GOV_API_KEY")
+                    return all_opportunities
+                elif r.status_code == 429:
+                    print(f"⚠️  API rate limited (429). Waiting 10 seconds...")
+                    time.sleep(10)
                     continue
                     
                 r.raise_for_status()
                 data = r.json()
                 
-                # Handle different response formats
-                solicitations = data.get("solicitations", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                total_records = data.get("totalRecords", 0)
+                opportunities = data.get("opportunitiesData", [])
                 
-                print(f"✅ Received {len(solicitations)} solicitations from API")
+                if page == 0:
+                    print(f"  Total records available: {total_records}")
                 
-                for solicitation in solicitations:
-                    sol_title = solicitation.get("solicitation_title") or solicitation.get("title")
-                    branch = solicitation.get("branch") or solicitation.get("component")
-                    program = solicitation.get("program")
-                    release_date = solicitation.get("release_date") or solicitation.get("open_date")
-                    close_date = solicitation.get("close_date") or solicitation.get("application_due_date")
-                    status = solicitation.get("current_status") or solicitation.get("status")
-                    
-                    # Extract topics from each solicitation
-                    sol_topics = solicitation.get("solicitation_topics") or solicitation.get("topics") or []
-                    
-                    if not sol_topics:
-                        # If no topics array, treat the solicitation itself as a topic
-                        sol_topics = [solicitation]
-                    
-                    for topic in sol_topics:
-                        topic_dict = {
-                            "topic_number": topic.get("topic_number") or topic.get("topicNumber"),
-                            "topic_title": topic.get("topic_title") or topic.get("title"),
-                            "topic_description": topic.get("topic_description") or topic.get("description"),
-                            "branch": topic.get("branch") or branch,
-                            "program": program,
-                            "solicitation_title": sol_title,
-                            "release_date": release_date,
-                            "close_date": close_date,
-                            "status": status,
-                            "topic_link": topic.get("sbir_topic_link") or topic.get("link"),
-                        }
-                        topics.append(topic_dict)
+                if not opportunities:
+                    print(f"  No more opportunities found")
+                    break
                 
-                if topics:
-                    self._save_cache(topics)
-                    print(f"✅ Successfully fetched {len(topics)} DoD SBIR/STTR topics")
-                else:
-                    print("⚠️  API returned no topics")
+                # Filter for SBIR/STTR opportunities
+                sbir_sttr_opps = []
+                for opp in opportunities:
+                    title = opp.get("title", "")
+                    description = opp.get("description", "")
                     
-                return topics
-                    
+                    # Check if this is a SBIR/STTR opportunity
+                    if any(keyword in title.upper() for keyword in ["SBIR", "STTR"]) or \
+                       any(keyword in description.upper() for keyword in ["SBIR", "STTR"]):
+                        sbir_sttr_opps.append(opp)
+                
+                print(f"  Found {len(sbir_sttr_opps)} SBIR/STTR opportunities in this batch")
+                all_opportunities.extend(sbir_sttr_opps)
+                
+                # Check if we've fetched all available records
+                if offset + limit >= total_records:
+                    print(f"  Reached end of results")
+                    break
+                
+                offset += limit
+                time.sleep(1)  # Be nice to the API
+                
             except requests.exceptions.RequestException as e:
-                print(f"❌ Network error on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    print(f"Failed to fetch DoD SBIR topics after {max_retries} attempts")
-                    break
+                print(f"❌ Network error: {e}")
+                break
             except Exception as e:
-                print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    break
-                    
-        return []
+                print(f"❌ Unexpected error: {e}")
+                break
+        
+        print(f"✅ Total SBIR/STTR opportunities fetched: {len(all_opportunities)}")
+        return all_opportunities
 
     def fetch(self) -> Iterable[dict]:
         """
-        Fetch DoD SBIR/STTR topics.
-        First checks cache, then tries SBIR.gov API with retry logic.
+        Fetch SBIR/STTR opportunities from SAM.gov.
         """
-        # 1. Check cache first to avoid unnecessary API calls
-        cached = self._check_cache()
-        if cached:
-            topics = cached
-        else:
-            # 2. Fetch from SBIR.gov API
-            topics = self._fetch_from_sbir_api()
+        opportunities = self._fetch_from_sam_gov()
         
-        if not topics:
-            print("⚠️  WARNING: No DoD SBIR topics found. Check API status or try again later.")
+        if not opportunities:
+            print("⚠️  No SBIR/STTR opportunities found from SAM.gov")
             return
 
-        # Process and yield each topic
-        for t in topics:
-            number = t.get("topic_number") or t.get("topicNumber") or t.get("number")
-            title = t.get("topic_title") or t.get("topicTitle") or t.get("title")
-            desc = t.get("topic_description") or t.get("description") or t.get("synopsis")
-            comp = t.get("branch") or t.get("component") or t.get("service")
-            prog = t.get("program")
+        # Process and yield each opportunity
+        for opp in opportunities:
+            notice_id = opp.get("noticeId")
+            title = opp.get("title", "")
+            solicitation_number = opp.get("solicitationNumber")
+            department = opp.get("department", "")
+            sub_tier = opp.get("subTier", "")  # Specific agency (e.g., "Air Force")
+            office = opp.get("office", "")
             
-            open_d = _to_date(t.get("release_date") or t.get("openDate") or t.get("open_date"))
-            close_d = _to_date(t.get("close_date") or t.get("closeDate") or t.get("dueDate"))
-            status = t.get("status") or t.get("current_status")
+            description = opp.get("description", "")
             
-            topic_link = t.get("topic_link") or t.get("sbir_topic_link")
-            if topic_link:
-                details_url = topic_link
-            elif number:
-                details_url = f"{TOPICS_APP_URL}#/?search={number}"
+            posted_date = _to_date(opp.get("postedDate"))
+            response_deadline = _to_date(opp.get("responseDeadLine"))
+            
+            opp_type = opp.get("type", "")
+            active = opp.get("active", "")
+            
+            naics_code = opp.get("naicsCode", "")
+            classification_code = opp.get("classificationCode", "")
+            
+            # Build URL to the opportunity on SAM.gov
+            if notice_id:
+                landing_url = f"https://sam.gov/opp/{notice_id}/view"
             else:
-                details_url = TOPICS_APP_URL
-
+                landing_url = "https://sam.gov"
+            
+            # Determine agency name
+            if sub_tier:
+                agency = f"{department} - {sub_tier}" if department else sub_tier
+            else:
+                agency = department or "Federal Agency"
+            
+            # Detect mechanism (SBIR/STTR)
+            mechanism = _mechanism_from_text(title, description, solicitation_number)
+            
             yield {
-                "title": title or (number or "(Untitled)"),
-                "summary": desc,
-                "opportunity_number": number,
-                "component": comp,
-                "mechanism": prog or _mechanism_from_text(prog, title, desc),
-                "posted_date": open_d,
-                "close_date": close_d,
-                "landing": details_url,
-                "status": status,
-                "solicitation": t.get("solicitation_title"),
+                "title": title or "(Untitled)",
+                "summary": description[:1000] if description else None,  # Truncate long descriptions
+                "opportunity_id": solicitation_number or notice_id,
+                "notice_id": notice_id,
+                "agency": agency,
+                "department": department,
+                "sub_tier": sub_tier,
+                "office": office,
+                "mechanism": mechanism,
+                "posted_date": posted_date,
+                "close_date": response_deadline,
+                "landing": landing_url,
+                "status": "Active" if active == "Yes" else "Inactive",
+                "type": opp_type,
+                "naics_code": naics_code,
+                "classification_code": classification_code,
             }
 
     def normalize(self, item: dict) -> dict:
         title = item.get("title") or "(Untitled)"
-        number = item.get("opportunity_number")
-        comp = item.get("component")
-        mech = item.get("mechanism")
+        opp_id = item.get("opportunity_id")
+        notice_id = item.get("notice_id")
+        agency = item.get("agency", "Federal Agency")
+        mechanism = item.get("mechanism")
         url = item.get("landing")
         status = item.get("status")
+        opp_type = item.get("type")
 
         return {
             "source": self.source,
-            "opportunity_id": number,
+            "opportunity_id": opp_id,
             "title": title,
-            "agency": _component_to_agency(comp),
-            "mechanism": mech,
-            "category": status,  # pre-release, open, etc.
+            "agency": agency,
+            "mechanism": mechanism,
+            "category": f"{status} - {opp_type}" if status and opp_type else (status or opp_type),
             "summary": item.get("summary"),
             "eligibility": None,
             "keywords": None,
@@ -237,10 +240,12 @@ class DodSbirIngestor(BaseIngestor):
             "urls": {"landing": url, "details": url, "pdf": None},
             "assistance_listing": None,
             "raw": {
-                "component": comp,
-                "program": mech,
-                "status": status,
-                "solicitation": item.get("solicitation"),
+                "notice_id": notice_id,
+                "department": item.get("department"),
+                "sub_tier": item.get("sub_tier"),
+                "office": item.get("office"),
+                "naics_code": item.get("naics_code"),
+                "classification_code": item.get("classification_code"),
             },
-            "hash": _hash(title, url),
+            "hash": _hash(title, opp_id or notice_id),
         }
