@@ -1,4 +1,4 @@
-#from .grants_gov import GrantsGovIngestor
+from .grants_gov import GrantsGovIngestor
 #from .nih_guide import NihGuideIngestor
 #from .nsf import NsfIngestor
 #from .darpa import DarpaIngestor
@@ -9,7 +9,7 @@ from .rwjf import RwjfIngestor
 from .gates import GatesIngestor
 
 REGISTRY = {
-    #"grantsgov": GrantsGovIngestor,
+    "grants_gov": GrantsGovIngestor,
     #"nih": NihGuideIngestor,
     #"nsf": NsfIngestor,
     #"darpa": DarpaIngestor,
