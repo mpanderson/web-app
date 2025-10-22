@@ -171,12 +171,12 @@ class DodSbirIngestor(BaseIngestor):
                 "landing": details_url,
             }
 
-    def normalize(self, raw: dict) -> dict:
-        title = raw.get("title") or "(Untitled)"
-        number = raw.get("opportunity_number")
-        comp = raw.get("component")
-        mech = raw.get("mechanism")
-        url = raw.get("landing")
+    def normalize(self, item: dict) -> dict:
+        title = item.get("title") or "(Untitled)"
+        number = item.get("opportunity_number")
+        comp = item.get("component")
+        mech = item.get("mechanism")
+        url = item.get("landing")
 
         return {
             "source": self.source,
@@ -185,16 +185,16 @@ class DodSbirIngestor(BaseIngestor):
             "agency": _component_to_agency(comp),
             "mechanism": mech,
             "category": None,
-            "summary": raw.get("summary"),
+            "summary": item.get("summary"),
             "eligibility": None,
             "keywords": None,
-            "posted_date": raw.get("posted_date"),
-            "close_date": raw.get("close_date"),
+            "posted_date": item.get("posted_date"),
+            "close_date": item.get("close_date"),
             "urls": {"landing": url, "details": url, "pdf": None},
             "assistance_listing": None,
             "raw": {
                 "component": comp,
-                "solicitation_or_program": raw.get("mechanism"),
+                "solicitation_or_program": item.get("mechanism"),
             },
             "hash": _hash(title, url),
         }

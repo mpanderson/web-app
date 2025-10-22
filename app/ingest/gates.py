@@ -28,7 +28,7 @@ class GatesIngestor(BaseIngestor):
         # Each funding card links to a detail page
         for a in soup.select("a[href*='/what-we-do/funding-opportunities/']"):
             href = a.get("href")
-            if not href: continue
+            if not href or isinstance(href, list): continue
             detail = href if href.startswith("http") else BASE + href
 
             time.sleep(1.0)
@@ -39,10 +39,12 @@ class GatesIngestor(BaseIngestor):
                 continue
 
             ds = BeautifulSoup(dr.text, "html.parser")
-            title = ds.find("h1").get_text(strip=True) if ds.find("h1") else a.get_text(strip=True)
+            h1 = ds.find("h1")
+            title = h1.get_text(strip=True) if h1 else a.get_text(strip=True)
             # summary: first paragraph
             main = ds.select_one("article, .content, main")
-            summary = (main.find("p").get_text(" ", strip=True) if main and main.find("p") else None)
+            p = main.find("p") if main else None
+            summary = p.get_text(" ", strip=True) if p else None
 
             # Gates often has RFPs with short windows; dates may not always be on page
             close = None
@@ -55,9 +57,9 @@ class GatesIngestor(BaseIngestor):
                 "close_date": close,
             }
 
-    def normalize(self, raw: dict) -> dict:
-        url = raw.get("landing")
-        title = raw.get("title") or "(Untitled)"
+    def normalize(self, item: dict) -> dict:
+        url = item.get("landing")
+        title = item.get("title") or "(Untitled)"
         return {
             "source": self.source,
             "opportunity_id": None,
@@ -65,11 +67,11 @@ class GatesIngestor(BaseIngestor):
             "agency": "Bill & Melinda Gates Foundation",
             "mechanism": None,
             "category": None,
-            "summary": raw.get("summary"),
+            "summary": item.get("summary"),
             "eligibility": None,
             "keywords": None,
-            "posted_date": raw.get("posted_date"),
-            "close_date": raw.get("close_date"),
+            "posted_date": item.get("posted_date"),
+            "close_date": item.get("close_date"),
             "urls": {"landing": url, "details": url, "pdf": None},
             "assistance_listing": None,
             "raw": None,

@@ -35,7 +35,7 @@ class RwjfIngestor(BaseIngestor):
 
         for a in soup.select("a[href*='/en/grants/active-funding-opportunities/']"):
             detail = a.get("href")
-            if not detail: continue
+            if not detail or isinstance(detail, list): continue
             detail_url = BASE + detail if detail.startswith("/") else detail
 
             time.sleep(1.0)
@@ -46,7 +46,8 @@ class RwjfIngestor(BaseIngestor):
                 continue
             ds = BeautifulSoup(dr.text, "html.parser")
 
-            title = ds.find("h1").get_text(strip=True) if ds.find("h1") else a.get_text(strip=True)
+            h1 = ds.find("h1")
+            title = h1.get_text(strip=True) if h1 else a.get_text(strip=True)
             # summary: first paragraph in main content
             summary = ""
             main = ds.select_one("article, .content, main")
@@ -72,9 +73,9 @@ class RwjfIngestor(BaseIngestor):
                 "close_date": close,
             }
 
-    def normalize(self, raw: dict) -> dict:
-        title = raw.get("title") or "(Untitled)"
-        url = raw.get("landing")
+    def normalize(self, item: dict) -> dict:
+        title = item.get("title") or "(Untitled)"
+        url = item.get("landing")
         return {
             "source": self.source,
             "opportunity_id": None,
@@ -82,11 +83,11 @@ class RwjfIngestor(BaseIngestor):
             "agency": "RWJF",
             "mechanism": None,
             "category": None,
-            "summary": raw.get("summary"),
+            "summary": item.get("summary"),
             "eligibility": None,
             "keywords": None,
-            "posted_date": raw.get("posted_date"),
-            "close_date": raw.get("close_date"),
+            "posted_date": item.get("posted_date"),
+            "close_date": item.get("close_date"),
             "urls": {"landing": url, "details": url, "pdf": None},
             "assistance_listing": None,
             "raw": None,
