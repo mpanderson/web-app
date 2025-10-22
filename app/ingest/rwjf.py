@@ -29,25 +29,79 @@ class RwjfIngestor(BaseIngestor):
     def fetch(self):
         # Active Funding Opportunities
         url = f"{BASE}/en/grants/active-funding-opportunities.html"
-        r = requests.get(url, headers=HEADERS, timeout=30)
-        r.raise_for_status()
+        print(f"Fetching RWJF opportunities from {url}")
+        
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            print(f"✅ Successfully loaded RWJF page ({len(r.text)} chars)")
+        except Exception as e:
+            print(f"❌ Failed to load RWJF page: {e}")
+            return
+            
         soup = BeautifulSoup(r.text, "html.parser")
 
-        for a in soup.select("a[href*='/en/grants/active-funding-opportunities/']"):
-            detail = a.get("href")
-            if not detail or isinstance(detail, list): continue
-            detail_url = BASE + detail if detail.startswith("/") else detail
+        # Try multiple selectors
+        selectors = [
+            "a[href*='/en/grants/active-funding-opportunities/']",
+            "a[href*='/grants/']",
+            "div[class*='opportunity'] a",
+            "div[class*='grant'] a",
+            "article a",
+            "div[class*='card'] a",
+        ]
+        
+        opportunities = []
+        for selector in selectors:
+            links = soup.select(selector)
+            # Filter to only include links that go to specific grant pages (not just nav)
+            filtered = [a for a in links if a.get("href") and "/active-funding-opportunities/" in a.get("href")]
+            if filtered:
+                print(f"Found {len(filtered)} potential opportunities using selector: {selector}")
+                opportunities = filtered
+                break
+        
+        if not opportunities:
+            print("⚠️  No funding opportunity links found on RWJF page")
+            print("   This is normal - they may not have active funding calls at this time")
+            return
 
+        count = 0
+        for a in opportunities:
+            detail = a.get("href")
+            if not detail or isinstance(detail, list):
+                continue
+                
+            # Skip navigation links
+            link_text = a.get_text(strip=True).lower()
+            if link_text in ["active funding opportunities", "grants", "find a grant", "back", "home"]:
+                continue
+                
+            detail_url = BASE + detail if detail.startswith("/") else detail
+            
+            # Skip if it's just the main opportunities page
+            if detail_url == url:
+                continue
+
+            print(f"  Fetching details from: {detail_url}")
             time.sleep(1.0)
+            
             try:
                 dr = requests.get(detail_url, headers=HEADERS, timeout=30)
                 dr.raise_for_status()
-            except Exception:
+            except Exception as e:
+                print(f"    ❌ Failed to load details: {e}")
                 continue
+                
             ds = BeautifulSoup(dr.text, "html.parser")
 
             h1 = ds.find("h1")
             title = h1.get_text(strip=True) if h1 else a.get_text(strip=True)
+            
+            # Skip if title is too generic
+            if title.lower() in ["active funding opportunities", "grants"]:
+                continue
+                
             # summary: first paragraph in main content
             summary = ""
             main = ds.select_one("article, .content, main")
@@ -65,6 +119,9 @@ class RwjfIngestor(BaseIngestor):
                     close = _date_guess(m.group(1))
                     break
 
+            count += 1
+            print(f"    ✅ Found: {title[:60]}")
+            
             yield {
                 "title": title or "(Untitled)",
                 "summary": summary or None,
@@ -72,6 +129,8 @@ class RwjfIngestor(BaseIngestor):
                 "posted_date": None,
                 "close_date": close,
             }
+        
+        print(f"✅ RWJF: Found {count} funding opportunities")
 
     def normalize(self, item: dict) -> dict:
         title = item.get("title") or "(Untitled)"
