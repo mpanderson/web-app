@@ -1,14 +1,14 @@
 # app/main.py
 from __future__ import annotations
 
-import io
 import os
 import shutil
 import tempfile
 from datetime import datetime
 from typing import Optional
+import math
 
-import pandas as pd
+import dateparser
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -48,20 +48,18 @@ def shutdown():
 
 def _to_date(s):
     """Flexible date parser -> datetime.date | None."""
-    if s is None or (isinstance(s, float) and pd.isna(s)):
+    if s is None:
+        return None
+    # Handle NaN for float types
+    if isinstance(s, float) and math.isnan(s):
         return None
     s = str(s).strip()
-    if not s:
+    if not s or s.lower() in ('nan', 'none', 'null'):
         return None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except Exception:
-            pass
-    # Pandas fallback
+    # Try dateparser for flexible parsing
     try:
-        x = pd.to_datetime(s, errors="coerce")
-        return x.date() if pd.notna(x) else None
+        parsed = dateparser.parse(s)
+        return parsed.date() if parsed else None
     except Exception:
         return None
 
@@ -137,221 +135,27 @@ def ingest_run(source: str):
 
 
 # ---------- Ingest (CSV uploads) ----------
-
-# NIH / NSF exports
-@app.post("/ingest/csv")
-def ingest_csv(
-    source_name: str = Form(...),   # "nih_export" or "nsf_export"
-    file: UploadFile = File(...)
-):
-    from ingest.base import _coerce_to_opportunity  # reuse your helper
-
-    s = SessionLocal()
-    try:
-        raw = file.file.read()
-        try:
-            df = pd.read_csv(io.BytesIO(raw), engine="python")
-        except Exception:
-            df = pd.read_excel(io.BytesIO(raw))
-
-        ingested = 0
-
-        if source_name == "nih_export":
-            # Expected: Title, Release_Date, Expired_Date, Activity..., Document_Number, Document_Type, URL
-            for _, r in df.iterrows():
-                title = (r.get("Title") or "").strip()
-                posted = _to_date(r.get("Release_Date"))
-                close  = _to_date(r.get("Expired_Date"))
-                mech   = (r.get("Activity...") or r.get("Activity") or "").strip()
-                docno  = (r.get("Document_Number") or "").strip()
-                dtype  = (r.get("Document_Type") or "").strip()
-                url    = (r.get("URL") or "").strip()
-
-                rec = {
-                    "source": "nih_export",
-                    "opportunity_id": docno or None,
-                    "title": title or "(Untitled)",
-                    "agency": "NIH",
-                    "mechanism": mech,
-                    "category": dtype or None,
-                    "summary": None,
-                    "eligibility": None,
-                    "keywords": None,
-                    "posted_date": posted,
-                    "close_date": close,
-                    "urls": {"landing": url or None, "details": url or None, "pdf": None},
-                    "assistance_listing": None,
-                    "raw": None,
-                    "hash": _hash3(title, docno, url),
-                }
-
-                opp = _coerce_to_opportunity(rec)
-                existing = s.query(Opportunity).filter_by(hash=opp.hash).one_or_none()
-                if existing:
-                    for attr in ["source","opportunity_id","title","agency","mechanism","category","summary",
-                                 "eligibility","keywords","posted_date","close_date","urls","assistance_listing","raw"]:
-                        setattr(existing, attr, getattr(opp, attr))
-                    s.add(existing)
-                else:
-                    s.add(opp)
-                ingested += 1
-
-        elif source_name == "nsf_export":
-            # Expected: Title, Synopsis, (Next due date ...), Posted date (Y-m-d), URL, Type / Award Type, Solicitation URL
-            next_due_col = next((c for c in df.columns if "Next due date" in c), None)
-            import re
-            for _, r in df.iterrows():
-                title = (r.get("Title") or "").strip()
-                synopsis = (r.get("Synopsis") or "").strip() or None
-                posted = _to_date(r.get("Posted date (Y-m-d)"))
-                next_due_text = r.get(next_due_col) if next_due_col else None
-                close = None
-                if isinstance(next_due_text, str):
-                    m = re.search(r"(\d{4}-\d{2}-\d{2})", next_due_text)
-                    if m: close = _to_date(m.group(1))
-                    if not close:
-                        m2 = re.search(r"([A-Za-z]+ \d{1,2}, \d{4})", next_due_text)
-                        if m2: close = _to_date(m2.group(1))
-                url = (r.get("URL") or "").strip()
-                sol_url = (r.get("Solicitation URL") or "").strip()
-                mech = (r.get("Type") or r.get("Award Type") or "").strip()
-
-                rec = {
-                    "source": "nsf_export",
-                    "opportunity_id": None,
-                    "title": title or "(Untitled)",
-                    "agency": "NSF",
-                    "mechanism": mech,
-                    "category": None,
-                    "summary": synopsis,
-                    "eligibility": None,
-                    "keywords": None,
-                    "posted_date": posted,
-                    "close_date": close,
-                    "urls": {"landing": url or None, "details": (sol_url or url or None), "pdf": None},
-                    "assistance_listing": None,
-                    "raw": None,
-                    "hash": _hash3(title, mech, sol_url or url),
-                }
-
-                opp = _coerce_to_opportunity(rec)
-                existing = s.query(Opportunity).filter_by(hash=opp.hash).one_or_none()
-                if existing:
-                    for attr in ["source","opportunity_id","title","agency","mechanism","category","summary",
-                                 "eligibility","keywords","posted_date","close_date","urls","assistance_listing","raw"]:
-                        setattr(existing, attr, getattr(opp, attr))
-                    s.add(existing)
-                else:
-                    s.add(opp)
-                ingested += 1
-
-        else:
-            raise HTTPException(status_code=400, detail="source_name must be one of: nih_export, nsf_export")
-
-        s.commit()
-        return {"ingested": ingested, "source": source_name, "columns_seen": list(df.columns)}
-    finally:
-        s.close()
+# NOTE: CSV upload endpoints disabled to reduce deployment image size
+# The /ingest/csv and /ingest/grants_csv endpoints have been removed because
+# they required pandas (adds ~100MB to image). Core automated ingestion via
+# API calls (Grants.gov API, SAM.gov API, web scraping) remains fully functional.
 
 
-# Grants.gov export (your new workflow)
-@app.post("/ingest/grants_csv")
-def ingest_grants_csv(
-    file: UploadFile = File(...),
-    source_name: str = Form("grants_export")
-):
-    """
-    Ingest a Grants.gov CSV export (single file) and normalize rows into opportunities.
-    We build a details URL as: https://www.grants.gov/search-results-detail/<opportunity_id>
-    """
-    from ingest.base import _coerce_to_opportunity
-
-    s = SessionLocal()
-    try:
-        raw = file.file.read()
-        try:
-            df = pd.read_csv(io.BytesIO(raw), engine="python")
-        except Exception:
-            df = pd.read_excel(io.BytesIO(raw))
-
-        # Be robust to header variants
-        def col(*names):
-            for n in names:
-                if n in df.columns:
-                    return n
-            return None
-
-        col_id     = col("opportunity_id","Opportunity ID","OpportunityID","opportunityId")
-        col_num    = col("opportunity_number","Opportunity Number","OpportunityNumber","opportunityNumber")
-        col_title  = col("opportunity_title","Opportunity Title","Title","opportunityTitle")
-        col_post   = col("post_date","Post Date","Posted Date","open_date","postedDate")
-        col_close  = col("close_date","Close Date","close_date_description","Close Date Description","closeDate")
-        col_agency = col("agency_name","top_level_agency_name","Agency Name","Top Level Agency Name","agencyName")
-        col_cat    = col("category","Category","category_explanation","Category Explanation")
-        col_sum    = col("summary_description","Synopsis","Summary","synopsis")
-        col_addl   = col("additional_info_url","Additional Info URL","additionalInfoUrl")
-        col_expected = col("expected_number_of_awards", "Expected Number of Awards")
-        col_total    = col("estimated_total_program_funding", "Estimated Total Program Funding")
-        col_floor    = col("award_floor", "Award Floor")
-        col_ceiling  = col("award_ceiling", "Award Ceiling")
-
-        ingested = 0
-        for _, r in df.iterrows():
-            oid   = (str(r.get(col_id))   if col_id   else "").strip()
-            onum  = (str(r.get(col_num))  if col_num  else "").strip()
-            title = (str(r.get(col_title)) if col_title else "").strip()
-            agency= (str(r.get(col_agency)) if col_agency else "").strip()
-            cat   = (str(r.get(col_cat))   if col_cat   else "").strip()
-            summ  = (str(r.get(col_sum))   if col_sum   else "").strip() or None
-
-            posted= _to_date(r.get(col_post)) if col_post else None
-            close = _to_date(r.get(col_close)) if col_close else None
-
-            addl  = (str(r.get(col_addl)) if col_addl else "").strip()
-            details_url = addl or (f"https://www.grants.gov/search-results-detail/{oid}" if oid else None)
-            expected_awards = (str(r.get(col_expected)) if col_expected else None)
-            total_funding   = (str(r.get(col_total))   if col_total   else None)
-            award_floor     = (str(r.get(col_floor))   if col_floor   else None)
-            award_ceiling   = (str(r.get(col_ceiling)) if col_ceiling else None)
-
-            rec = {
-                "source": source_name,
-                "opportunity_id": onum or oid or None,  # prefer number; fallback to id
-                "title": title or "(Untitled)",
-                "agency": agency or None,
-                "mechanism": None,                      # can be inferred later from title/number
-                "category": cat or None,
-                "summary": summ,
-                "eligibility": None,
-                "keywords": None,
-                "posted_date": posted,
-                "close_date": close,
-                "urls": {"landing": details_url, "details": details_url, "pdf": None},
-                "assistance_listing": None,
-                "raw": {
-                    "expected_number_of_awards": expected_awards,
-                    "estimated_total_program_funding": total_funding,
-                    "award_floor": award_floor,
-                    "award_ceiling": award_ceiling,
-                },
-                "hash": _hash3(title, (onum or oid), details_url),
-            }
-
-            opp = _coerce_to_opportunity(rec)
-            existing = s.query(Opportunity).filter_by(hash=opp.hash).one_or_none()
-            if existing:
-                for attr in ["source","opportunity_id","title","agency","mechanism","category","summary",
-                             "eligibility","keywords","posted_date","close_date","urls","assistance_listing","raw"]:
-                    setattr(existing, attr, getattr(opp, attr))
-                s.add(existing)
-            else:
-                s.add(opp)
-            ingested += 1
-
-        s.commit()
-        return {"ingested": ingested, "source": source_name, "columns_seen": list(df.columns)}
-    finally:
-        s.close()
+# # NIH / NSF exports - DISABLED
+# @app.post("/ingest/csv")
+# def ingest_csv(
+#     source_name: str = Form(...),
+#     file: UploadFile = File(...)
+# ):
+#     ...code removed...
+#
+# # Grants.gov CSV export - DISABLED
+# @app.post("/ingest/grants_csv")
+# def ingest_grants_csv(
+#     file: UploadFile = File(...),
+#     source_name: str = Form("grants_export")
+# ):
+#     ...code removed...
 
 
 # ---------- Match (vector) ----------
