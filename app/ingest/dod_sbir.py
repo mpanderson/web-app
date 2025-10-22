@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Iterable, Any
 import requests
 from bs4 import BeautifulSoup
+from requests_html import HTMLSession
 
 from .base import BaseIngestor
 from models import Opportunity
@@ -13,14 +14,8 @@ HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: you@example.org)"}
 # Official SBIR.gov API endpoint for DoD topics
 SBIR_API_URL = "https://api.www.sbir.gov/public/api/solicitations"
 
-# DoD Topics App - try multiple possible endpoints
-TOPICS_APP_BASE = "https://www.dodsbirsttr.mil/topics-app"
-TOPICS_APP_ENDPOINTS = [
-    f"{TOPICS_APP_BASE}/topicSearch",
-    f"{TOPICS_APP_BASE}/api/topics",
-    f"{TOPICS_APP_BASE}/api/topicSearch",
-    "https://www.dodsbirsttr.mil/api/topics",
-]
+# DoD Topics App
+TOPICS_APP_URL = "https://www.dodsbirsttr.mil/topics-app/"
 
 # Simple in-memory cache to avoid rate limiting
 _cache = {"data": None, "timestamp": None, "ttl_seconds": 300}  # 5 min cache
@@ -63,12 +58,8 @@ def _component_to_agency(component: str | None) -> str:
 
 class DodSbirIngestor(BaseIngestor):
     """
-    Ingestor for DoD SBIR/STTR topics.
-    Priority: 
-    1. Check cache (avoid rate limiting)
-    2. Try SBIR.gov API with retry/backoff
-    3. Fall back to DoD topics app endpoints
-    4. Parse HTML as last resort
+    Ingestor for DoD SBIR/STTR topics using browser rendering.
+    This captures both pre-release and open announcements from the SPA.
     """
     source = "dod_sbir"
 
@@ -86,13 +77,87 @@ class DodSbirIngestor(BaseIngestor):
         _cache["data"] = data
         _cache["timestamp"] = datetime.now()
 
-    def _fetch_from_sbir_api(self) -> list[dict]:
+    def _fetch_with_browser_rendering(self) -> list[dict]:
         """
-        Fetch from SBIR.gov API with exponential backoff retry logic.
+        Use requests-html to render the JavaScript SPA and scrape the table.
         """
         topics = []
-        max_retries = 3
-        base_delay = 2  # seconds
+        
+        try:
+            print("Rendering DoD topics app with JavaScript...")
+            session = HTMLSession()
+            r = session.get(TOPICS_APP_URL, timeout=60)
+            
+            # Render JavaScript - this will execute the JS and wait for page to load
+            # Note: This might take 10-20 seconds
+            r.html.render(timeout=30, sleep=3)  # Wait 3 seconds after JS execution
+            
+            soup = BeautifulSoup(r.html.html, 'html.parser')
+            
+            # Parse the topics table
+            # Looking for table rows with topic data
+            rows = soup.select('tr') or soup.select('[class*="topic"]') or soup.select('[class*="row"]')
+            
+            print(f"Found {len(rows)} potential topic rows")
+            
+            for row in rows:
+                # Extract topic data from table cells
+                cells = row.find_all(['td', 'div'])
+                
+                # Try to find topic number pattern (e.g., A254-049, CBD254-005)
+                text = row.get_text(' ', strip=True)
+                topic_match = re.search(r'([A-Z]+\d+-[A-Z]?\d+)', text)
+                
+                if not topic_match:
+                    continue
+                    
+                number = topic_match.group(1)
+                
+                # Extract other fields
+                # Typical structure: Topic #, Title, Open, Close, Release #, etc.
+                title_match = re.search(r'([A-Z][^0-9\n]{20,}?)(?:\d{2}/\d{2}/\d{4}|Pre-Release|Open)', text)
+                title = title_match.group(1).strip() if title_match else text[:100]
+                
+                # Extract dates (MM/DD/YYYY format)
+                dates = re.findall(r'(\d{2}/\d{2}/\d{4})', text)
+                open_date = _to_date(dates[0]) if len(dates) > 0 else None
+                close_date = _to_date(dates[1]) if len(dates) > 1 else None
+                
+                # Check if pre-release
+                status = "Pre-Release" if "Pre-Release" in text else ("Open" if "Open" in text else None)
+                
+                # Extract component (ARMY, CBD, etc.)
+                comp_match = re.search(r'\b(ARMY|NAVY|AIR FORCE|CBD|DARPA|MDA|SOCOM|OSD)\b', text, re.IGNORECASE)
+                component = comp_match.group(1).upper() if comp_match else None
+                
+                topics.append({
+                    "topic_number": number,
+                    "topic_title": title,
+                    "topic_description": None,  # Would need to click into detail page
+                    "branch": component,
+                    "program": None,  # Extract from detail if needed
+                    "release_date": open_date,
+                    "close_date": close_date,
+                    "status": status,
+                })
+            
+            session.close()
+            
+            if topics:
+                print(f"Scraped {len(topics)} topics from rendered page")
+                self._save_cache(topics)
+            
+            return topics
+            
+        except Exception as e:
+            print(f"Browser rendering failed: {e}")
+            return []
+
+    def _fetch_from_sbir_api(self) -> list[dict]:
+        """
+        Try SBIR.gov API (with retry logic for rate limiting).
+        """
+        topics = []
         
         params = {
             "agency": "DOD",
@@ -100,105 +165,51 @@ class DodSbirIngestor(BaseIngestor):
             "start": 0
         }
         
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    # Exponential backoff with jitter
-                    delay = base_delay * (2 ** attempt) + (time.time() % 1)
-                    print(f"Retry {attempt}/{max_retries} after {delay:.1f}s delay...")
-                    time.sleep(delay)
-                
-                r = requests.get(SBIR_API_URL, params=params, headers=HEADERS, timeout=40)
-                
-                if r.status_code == 429:
-                    print(f"SBIR.gov API rate limited (429)")
-                    continue  # Retry
+        try:
+            r = requests.get(SBIR_API_URL, params=params, headers=HEADERS, timeout=40)
+            
+            if r.status_code == 429:
+                print(f"SBIR.gov API rate limited (429) - skipping")
+                return []
                     
-                r.raise_for_status()
-                data = r.json()
+            r.raise_for_status()
+            data = r.json()
+            
+            solicitations = data if isinstance(data, list) else []
+            
+            for solicitation in solicitations:
+                sol_title = solicitation.get("solicitation_title") or solicitation.get("title")
+                branch = solicitation.get("branch") or solicitation.get("component")
+                program = solicitation.get("program")
+                release_date = solicitation.get("release_date") or solicitation.get("open_date")
+                close_date = solicitation.get("close_date") or solicitation.get("application_due_date")
+                status = solicitation.get("current_status")
                 
-                # Process solicitations and extract topics
-                solicitations = data if isinstance(data, list) else []
+                sol_topics = solicitation.get("solicitation_topics") or solicitation.get("topics") or []
                 
-                for solicitation in solicitations:
-                    sol_title = solicitation.get("solicitation_title") or solicitation.get("title")
-                    branch = solicitation.get("branch") or solicitation.get("component")
-                    program = solicitation.get("program")
-                    release_date = solicitation.get("release_date") or solicitation.get("open_date")
-                    close_date = solicitation.get("close_date") or solicitation.get("application_due_date")
-                    status = solicitation.get("current_status")
-                    
-                    sol_topics = solicitation.get("solicitation_topics") or solicitation.get("topics") or []
-                    
-                    for topic in sol_topics:
-                        topic_dict = {
-                            "topic_number": topic.get("topic_number"),
-                            "topic_title": topic.get("topic_title") or topic.get("title"),
-                            "topic_description": topic.get("topic_description") or topic.get("description"),
-                            "branch": topic.get("branch") or branch,
-                            "program": program,
-                            "solicitation_title": sol_title,
-                            "release_date": release_date,
-                            "close_date": close_date,
-                            "status": status,
-                            "topic_link": topic.get("sbir_topic_link") or topic.get("link"),
-                        }
-                        topics.append(topic_dict)
+                for topic in sol_topics:
+                    topic_dict = {
+                        "topic_number": topic.get("topic_number"),
+                        "topic_title": topic.get("topic_title") or topic.get("title"),
+                        "topic_description": topic.get("topic_description") or topic.get("description"),
+                        "branch": topic.get("branch") or branch,
+                        "program": program,
+                        "solicitation_title": sol_title,
+                        "release_date": release_date,
+                        "close_date": close_date,
+                        "status": status,
+                        "topic_link": topic.get("sbir_topic_link") or topic.get("link"),
+                    }
+                    topics.append(topic_dict)
+            
+            if topics:
+                self._save_cache(topics)
+                print(f"Fetched {len(topics)} topics from SBIR.gov API")
+            return topics
                 
-                if topics:
-                    self._save_cache(topics)
-                    print(f"Fetched {len(topics)} topics from SBIR.gov API")
-                return topics
-                
-            except requests.exceptions.RequestException as e:
-                print(f"SBIR.gov API attempt {attempt + 1} failed: {e}")
-                if attempt == max_retries - 1:
-                    break
-                    
-        return []
-
-    def _fetch_from_topics_app(self) -> list[dict]:
-        """
-        Try various DoD topics app API endpoints with proper headers.
-        """
-        # Headers that mimic browser requests
-        browser_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Referer": f"{TOPICS_APP_BASE}/",
-            "Origin": "https://www.dodsbirsttr.mil",
-        }
-        
-        # Try different query parameter combinations
-        query_params_variants = [
-            {"cycle": "All Active Solicitations", "status": "Pre-Release,Open", "size": 100},
-            {"status": "Pre-Release,Open", "size": 100},
-            {"size": 100},
-            {},
-        ]
-        
-        for endpoint in TOPICS_APP_ENDPOINTS:
-            for params in query_params_variants:
-                try:
-                    r = requests.get(endpoint, params=params, headers=browser_headers, timeout=30)
-                    if r.status_code == 200:
-                        try:
-                            data = r.json()
-                            # Try to find topics in various structures
-                            if isinstance(data, list) and data:
-                                print(f"Found {len(data)} topics from {endpoint}")
-                                return data
-                            if isinstance(data, dict):
-                                for key in ("topics", "data", "results", "content", "items"):
-                                    if key in data and isinstance(data[key], list) and data[key]:
-                                        print(f"Found {len(data[key])} topics from {endpoint} -> {key}")
-                                        return data[key]
-                        except json.JSONDecodeError:
-                            continue
-                except Exception:
-                    continue
-        
-        return []
+        except Exception as e:
+            print(f"SBIR.gov API failed: {e}")
+            return []
 
     def fetch(self) -> Iterable[dict]:
         # 1. Check cache first
@@ -206,13 +217,13 @@ class DodSbirIngestor(BaseIngestor):
         if cached:
             topics = cached
         else:
-            # 2. Try SBIR.gov API with retry
-            topics = self._fetch_from_sbir_api()
+            # 2. Try browser rendering (most reliable for pre-release topics)
+            topics = self._fetch_with_browser_rendering()
             
-            # 3. Fall back to topics app endpoints
+            # 3. Fall back to SBIR.gov API if browser fails
             if not topics:
-                print("Trying DoD topics app endpoints...")
-                topics = self._fetch_from_topics_app()
+                print("Browser rendering returned no results, trying SBIR.gov API...")
+                topics = self._fetch_from_sbir_api()
         
         if not topics:
             print("WARNING: No DoD SBIR topics found from any source")
@@ -234,9 +245,9 @@ class DodSbirIngestor(BaseIngestor):
             if topic_link:
                 details_url = topic_link
             elif number:
-                details_url = f"{TOPICS_APP_BASE}/#/?search={number}"
+                details_url = f"{TOPICS_APP_URL}#/?search={number}"
             else:
-                details_url = TOPICS_APP_BASE
+                details_url = TOPICS_APP_URL
 
             yield {
                 "title": title or (number or "(Untitled)"),
