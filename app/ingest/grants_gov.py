@@ -1,16 +1,27 @@
 # app/ingest/grants_gov.py
-import hashlib, time
+import os, hashlib, time
 from datetime import datetime
 from typing import Iterable, Any
 import requests
 
 from .base import BaseIngestor
 
-HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: research@example.org)"}
-
 # Simpler.Grants.gov API endpoint
 API_BASE_URL = "https://api.simpler.grants.gov"
 SEARCH_ENDPOINT = f"{API_BASE_URL}/v1/opportunities/search"
+
+def _get_headers() -> dict:
+    """Get headers with API key if available."""
+    headers = {
+        "User-Agent": "RFA-Matcher/1.0 (+contact: research@example.org)",
+        "Content-Type": "application/json"
+    }
+    
+    api_key = os.getenv("GRANTS_GOV_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    
+    return headers
 
 def _hash(title: str | None, opp_id: str | None) -> str:
     h = hashlib.sha256()
@@ -75,7 +86,7 @@ class GrantsGovIngestor(BaseIngestor):
                     response = requests.post(
                         SEARCH_ENDPOINT,
                         json=payload,
-                        headers=HEADERS,
+                        headers=_get_headers(),
                         timeout=30
                     )
                     
