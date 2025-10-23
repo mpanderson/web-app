@@ -125,6 +125,7 @@ def get_opportunity_stats():
     from datetime import datetime, timedelta
     from sqlalchemy import func
     import pytz
+    import json
     
     s: Session = SessionLocal()
     try:
@@ -137,6 +138,30 @@ def get_opportunity_stats():
         ).group_by(Opportunity.source).all()
         
         by_source = {source: count for source, count in source_counts}
+        
+        # Read last update timestamp from file
+        last_update_time = None
+        last_update_formatted = "Never (no ingestion run yet)"
+        
+        try:
+            timestamp_file = os.path.join(os.path.dirname(__file__), "data", "last_update.json")
+            if os.path.exists(timestamp_file):
+                with open(timestamp_file, "r") as f:
+                    update_info = json.load(f)
+                    last_update_time = update_info.get("timestamp")
+                    
+                    # Parse and format the timestamp
+                    if last_update_time:
+                        # Handle both timezone-aware and naive timestamps
+                        try:
+                            dt = datetime.fromisoformat(last_update_time)
+                        except:
+                            dt = datetime.fromisoformat(last_update_time.replace('Z', '+00:00'))
+                        
+                        last_update_formatted = dt.strftime("%B %d, %Y at %I:%M %p")
+        except Exception as e:
+            # If we can't read the file, fall back to "Never"
+            pass
         
         # Calculate time until next scheduled update (12 PM or 8 PM EST)
         tz = pytz.timezone('America/New_York')
@@ -161,8 +186,8 @@ def get_opportunity_stats():
         return {
             "total": total,
             "by_source": by_source,
-            "timestamp": now.isoformat(),
-            "timestamp_formatted": now.strftime("%B %d, %Y at %I:%M %p"),
+            "last_update": last_update_time,
+            "last_update_formatted": last_update_formatted,
             "next_update_hours": round(hours_until_next, 1),
             "next_update_time": next_run.strftime("%I:%M %p")
         }
@@ -174,12 +199,36 @@ def get_opportunity_stats():
 
 @app.post("/ingest/run")
 def ingest_run(source: str):
+    from datetime import datetime
+    import json
+    
     if source not in REGISTRY:
         raise HTTPException(400, f"Unknown source: {source}. Choose from: {list(REGISTRY.keys())}")
     s: Session = SessionLocal()
     try:
         cnt = REGISTRY[source](s).run()
-        reindex(s)
+        indexed_count = reindex(s)
+        
+        # Save last update timestamp for manual ingestions too
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            os.makedirs(data_dir, exist_ok=True)
+            timestamp_file = os.path.join(data_dir, "last_update.json")
+            
+            update_info = {
+                "timestamp": datetime.now().isoformat(),
+                "total_ingested": cnt,
+                "indexed_count": indexed_count,
+                "source": source,
+                "type": "manual"
+            }
+            
+            with open(timestamp_file, "w") as f:
+                json.dump(update_info, f)
+        except Exception as e:
+            # Don't fail the ingestion if timestamp save fails
+            pass
+        
         return {"ingested": cnt, "source": source}
     finally:
         s.close()
@@ -626,7 +675,7 @@ async function showStats(){
   const contentDiv = document.getElementById('statsContent');
   
   let html = `<div style="font-size:14px;margin-bottom:6px;">
-    <strong>Last Updated:</strong> ${stats.timestamp_formatted}
+    <strong>Last Updated:</strong> ${stats.last_update_formatted}
   </div>
   <div style="font-size:14px;margin-bottom:6px;">
     <strong>Next Update in:</strong> ${stats.next_update_hours} hours (at ${stats.next_update_time})

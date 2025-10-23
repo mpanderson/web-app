@@ -69,6 +69,28 @@ def run_all_ingestions():
         logger.info(f"   Ingested: {total_ingested} new opportunities")
         logger.info("=" * 60)
         
+        # Save last update timestamp
+        try:
+            import json
+            import os
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            os.makedirs(data_dir, exist_ok=True)
+            timestamp_file = os.path.join(data_dir, "last_update.json")
+            
+            update_info = {
+                "timestamp": datetime.now().isoformat(),
+                "total_ingested": total_ingested,
+                "total_deleted": total_deleted,
+                "indexed_count": indexed_count
+            }
+            
+            with open(timestamp_file, "w") as f:
+                json.dump(update_info, f)
+            
+            logger.info(f"💾 Saved last update timestamp")
+        except Exception as e:
+            logger.error(f"⚠️  Failed to save timestamp: {str(e)}")
+        
     except Exception as e:
         logger.error(f"❌ Scheduled ingestion failed: {e}")
     finally:
