@@ -119,6 +119,34 @@ def list_opportunities(limit: int = 20, offset: int = 0):
         s.close()
 
 
+@app.get("/opportunities/stats")
+def get_opportunity_stats():
+    """Get summary statistics: total count, counts by source, and timestamp."""
+    from datetime import datetime
+    from sqlalchemy import func
+    
+    s: Session = SessionLocal()
+    try:
+        total = s.query(Opportunity).count()
+        
+        # Count by source
+        source_counts = s.query(
+            Opportunity.source,
+            func.count(Opportunity.id).label('count')
+        ).group_by(Opportunity.source).all()
+        
+        by_source = {source: count for source, count in source_counts}
+        
+        return {
+            "total": total,
+            "by_source": by_source,
+            "timestamp": datetime.now().isoformat(),
+            "timestamp_formatted": datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        }
+    finally:
+        s.close()
+
+
 # ---------- Ingest (live ingestors) ----------
 
 @app.post("/ingest/run")
@@ -529,11 +557,15 @@ def admin_page():
 
   <section>
     <h3>4) Utilities</h3>
-    <button onclick="fetch('/opportunities?limit=1').then(r=>r.json()).then(j=>out('utilsOut', j))">Count Opportunities</button>
+    <button onclick="showStats()">Count Opportunities</button>
     <a href="/match/form" style="margin-left:8px">Open Matcher Form →</a>
     <div style="margin-top:10px"></div>
     <button style="background:#ffe8e8;border:1px solid #f5bdbd" onclick="confirmReset()">⚠ Reset DB (delete all)</button>
     <pre id="resetOut" class="muted"></pre>
+    <div id="statsSummary" style="margin-top:12px;padding:12px;background:#f0f9ff;border-left:4px solid #0ea5e9;display:none;">
+      <div style="font-weight:600;margin-bottom:8px;color:#0c4a6e;">Database Summary</div>
+      <div id="statsContent"></div>
+    </div>
     <pre id="utilsOut" class="muted"></pre>
   </section>
 
@@ -560,6 +592,36 @@ up && up.addEventListener('submit', async (e)=>{
 async function confirmReset(){
   if (!confirm('This will delete ALL ingested opportunities and clear the vector index. Continue?')) return;
   await post('/admin/reset');
+}
+
+async function showStats(){
+  const r = await fetch('/opportunities/stats');
+  const stats = await r.json();
+  
+  // Show summary box
+  const summaryDiv = document.getElementById('statsSummary');
+  const contentDiv = document.getElementById('statsContent');
+  
+  let html = `<div style="font-size:14px;margin-bottom:6px;">
+    <strong>Last Updated:</strong> ${stats.timestamp_formatted}
+  </div>
+  <div style="font-size:14px;margin-bottom:8px;">
+    <strong>Total Opportunities:</strong> ${stats.total}
+  </div>`;
+  
+  if (Object.keys(stats.by_source).length > 0) {
+    html += '<div style="font-size:13px;"><strong>By Source:</strong></div><ul style="margin:4px 0;padding-left:20px;">';
+    for (const [source, count] of Object.entries(stats.by_source).sort((a,b) => b[1] - a[1])) {
+      html += `<li style="font-size:13px;margin:2px 0;">${source}: ${count}</li>`;
+    }
+    html += '</ul>';
+  }
+  
+  contentDiv.innerHTML = html;
+  summaryDiv.style.display = 'block';
+  
+  // Also show full JSON below
+  out('utilsOut', stats);
 }
 </script>
 </body>
