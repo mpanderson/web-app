@@ -122,8 +122,9 @@ def list_opportunities(limit: int = 20, offset: int = 0):
 @app.get("/opportunities/stats")
 def get_opportunity_stats():
     """Get summary statistics: total count, counts by source, and timestamp."""
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from sqlalchemy import func
+    import pytz
     
     s: Session = SessionLocal()
     try:
@@ -137,11 +138,33 @@ def get_opportunity_stats():
         
         by_source = {source: count for source, count in source_counts}
         
+        # Calculate time until next scheduled update (12 PM or 8 PM EST)
+        tz = pytz.timezone('America/New_York')
+        now = datetime.now(tz)
+        
+        # Scheduled times: 12:00 PM and 8:00 PM
+        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        evening_today = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        noon_tomorrow = noon_today + timedelta(days=1)
+        
+        # Find next scheduled time
+        next_run = None
+        if now < noon_today:
+            next_run = noon_today
+        elif now < evening_today:
+            next_run = evening_today
+        else:
+            next_run = noon_tomorrow
+        
+        hours_until_next = (next_run - now).total_seconds() / 3600
+        
         return {
             "total": total,
             "by_source": by_source,
-            "timestamp": datetime.now().isoformat(),
-            "timestamp_formatted": datetime.now().strftime("%B %d, %Y at %I:%M %p")
+            "timestamp": now.isoformat(),
+            "timestamp_formatted": now.strftime("%B %d, %Y at %I:%M %p"),
+            "next_update_hours": round(hours_until_next, 1),
+            "next_update_time": next_run.strftime("%I:%M %p")
         }
     finally:
         s.close()
@@ -604,6 +627,9 @@ async function showStats(){
   
   let html = `<div style="font-size:14px;margin-bottom:6px;">
     <strong>Last Updated:</strong> ${stats.timestamp_formatted}
+  </div>
+  <div style="font-size:14px;margin-bottom:6px;">
+    <strong>Next Update in:</strong> ${stats.next_update_hours} hours (at ${stats.next_update_time})
   </div>
   <div style="font-size:14px;margin-bottom:8px;">
     <strong>Total Opportunities:</strong> ${stats.total}
