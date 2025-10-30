@@ -3,8 +3,8 @@ import time, re, hashlib
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
-from .base import BaseIngestor
-from models import Opportunity
+from app.ingest.base import BaseIngestor
+from app.models import Opportunity
 
 HEADERS = {"User-Agent": "RFA-Matcher/1.0 (contact: you@example.org)"}
 BASE = "https://www.rwjf.org"

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Iterable, Any
 import requests
 
-from .base import BaseIngestor
+from app.ingest.base import BaseIngestor
 
 # Simpler.Grants.gov API endpoint
 API_BASE_URL = "https://api.simpler.grants.gov"

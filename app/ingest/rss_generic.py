@@ -5,8 +5,8 @@ import requests
 import feedparser
 from sqlalchemy.orm import Session
 
-from .base import BaseIngestor
-from models import Opportunity   # <-- add this
+from app.ingest.base import BaseIngestor
+from app.models import Opportunity   # <-- add this
 
 def _hash(*parts: str) -> str:
     h = hashlib.sha256()

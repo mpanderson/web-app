@@ -2,7 +2,7 @@ import os, hashlib, datetime, requests, feedparser
 from sqlalchemy.orm import Session
 from typing import Iterable
 from base import BaseIngestor
-from models import Opportunity
+from app.models import Opportunity
 
 def _hash(*parts: str) -> str:
     h = hashlib.sha256()

@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from bs4 import BeautifulSoup
 from dateparser import parse as dateparse
 
-from .base import BaseIngestor
-from settings import settings
+from app.ingest.base import BaseIngestor
+from app.settings import settings
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "../sample_data/nsf_rss.xml")
 NSF_RSS = "https://www.nsf.gov/rss/rss_www_funding.xml"  # generic NSF funding feed

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from bs4 import BeautifulSoup
 from dateparser import parse as dateparse
 
-from .base import BaseIngestor
+from app.ingest.base import BaseIngestor
 from ..settings import settings
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "../sample_data/nih_rss.xml")

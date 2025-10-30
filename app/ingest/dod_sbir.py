@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Iterable, Any
 import requests
 
-from .base import BaseIngestor
+from app.ingest.base import BaseIngestor
 
 HEADERS = {"User-Agent": "RFA-Matcher/1.0 (+contact: research@example.org)"}
 

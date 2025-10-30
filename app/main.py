@@ -13,18 +13,18 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from db import SessionLocal
-from models import Opportunity
-from schemas import OpportunityOut
-from scripts.init_db import main as init_db_main
-from ingest import REGISTRY
-from match.profile import extract_profile_text
-from match.matcher import match_opportunities
-from match.vectorstore import reindex
-from scheduler import start_scheduler, stop_scheduler, get_scheduler_status
+from app.db import SessionLocal
+from app.models import Opportunity
+from app.schemas import OpportunityOut
+from app.scripts.init_db import main as init_db_main
+from app.ingest import REGISTRY
+from app.match.profile import extract_profile_text
+from app.match.matcher import match_opportunities
+from app.match.vectorstore import reindex
+from app.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 
 # (LLM re-rank – safely falls back if quota/key is missing)
-from rerank.explainer import llm_rerank, RerankItem
+from app.rerank.explainer import llm_rerank, RerankItem
 
 
 app = FastAPI(title="RFA Matcher MVP")

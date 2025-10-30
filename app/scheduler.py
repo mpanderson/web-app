@@ -4,9 +4,9 @@ from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import logging
 
-from db import SessionLocal
-from ingest import REGISTRY
-from match.vectorstore import reindex
+from app.db import SessionLocal
+from app.ingest import REGISTRY
+from app.match.vectorstore import reindex
 
 # Set up logging
 logger = logging.getLogger("scheduler")
@@ -25,7 +25,7 @@ def run_all_ingestions():
     2. Re-ingest fresh data
     3. This prevents stale/closed opportunities from lingering
     """
-    from models import Opportunity
+    from app.models import Opportunity
     
     logger.info("=" * 60)
     logger.info(f"🕐 Starting scheduled ingestion at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

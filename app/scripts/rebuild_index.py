@@ -1,5 +1,5 @@
-from db import SessionLocal
-from match.vectorstore import reindex
+from app.db import SessionLocal
+from app.match.vectorstore import reindex
 
 def main():
     s = SessionLocal()

@@ -3,9 +3,9 @@ from typing import List, Tuple
 import numpy as np
 from sqlalchemy.orm import Session
 
-from models import Opportunity
-from settings import settings
-from utils.text import clean_text
+from app.models import Opportunity
+from app.settings import settings
+from app.utils.text import clean_text
 
 # Use path relative to the app directory
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")

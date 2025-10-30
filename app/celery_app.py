@@ -1,5 +1,5 @@
 from celery import Celery
-from settings import settings
+from app.settings import settings
 
 celery = Celery("rfa")
 celery.conf.broker_url = settings.redis_url

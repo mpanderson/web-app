@@ -1,8 +1,8 @@
 from celery import shared_task
 from sqlalchemy.orm import Session
-from db import SessionLocal
-from ingest import REGISTRY
-from match.vectorstore import reindex
+from app.db import SessionLocal
+from app.ingest import REGISTRY
+from app.match.vectorstore import reindex
 
 @shared_task(name="app.tasks.ingest_source")
 def ingest_source(source: str) -> int:

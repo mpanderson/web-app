@@ -2,7 +2,7 @@ import os, time
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from datetime import date
-from settings import settings
+from app.settings import settings
 
 # OpenAI client (lazy import so app runs without key)
 _client = None

@@ -1,6 +1,6 @@
 from sqlalchemy import text
-from db import engine
-from models import Base
+from app.db import engine
+from app.models import Base
 
 def main():
     Base.metadata.create_all(bind=engine)

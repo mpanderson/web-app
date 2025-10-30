@@ -29,7 +29,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd app && PYTHONPATH=/home/runner/workspace/app:$PYTHONPATH uvicorn main:app --host 0.0.0.0 --port 5000"
+args = "uvicorn app.main:app --host 0.0.0.0 --port 5000"
 waitForPort = 5000
 
 [[ports]]
@@ -37,16 +37,8 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 39165
-externalPort = 3000
-
-[[ports]]
 localPort = 42483
 externalPort = 3001
-
-[[ports]]
-localPort = 45703
-externalPort = 3002
 
 [deployment]
 deploymentTarget = "autoscale"

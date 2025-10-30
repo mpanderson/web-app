@@ -5,8 +5,8 @@ from datetime import date, datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from models import Opportunity
-from utils.text import content_hash  # if you have this helper; else you can use hashlib
+from app.models import Opportunity
+from app.utils.text import content_hash  # if you have this helper; else you can use hashlib
 
 def _to_date(maybe) -> Optional[date]:
     if maybe is None:
