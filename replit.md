@@ -171,10 +171,28 @@ Preferred communication style: Simple, everyday language.
 
 ### Configuration
 All external service connections are configured via environment variables or `.env` file:
-- `DATABASE_URL` - Database connection (defaults to SQLite)
+- `DATABASE_URL` - Database connection (defaults to SQLite, supports PostgreSQL via psycopg2-binary)
 - `EMBEDDINGS_BACKEND` - Defaults to "openai" for production deployment
 - `OPENAI_API_KEY` - **Required** for OpenAI embeddings and LLM reranking
 - `GRANTS_GOV_API_KEY` - Simpler.Grants.gov API key for automated federal grant ingestion
 - `SAM_GOV_API_KEY` - SAM.gov API key for SBIR/STTR opportunities
 - `redis_url` - Redis connection for Celery (external service)
 - `OFFLINE_DEMO` - Flag to use sample data instead of live sources
+
+## Deployment Optimization (October 30, 2025)
+
+Successfully reduced deployment image size to meet Google Cloud Run's 8 GiB limit:
+
+**Removed Dependencies:**
+- Chromium (1-2 GB) - removed from Nix environment (not needed for FastAPI)
+- cowsay - removed from Nix environment (unnecessary)
+
+**Excluded from Deployment (via .dockerignore):**
+- `.pythonlibs/` (7.3 GB) - Replit Python cache
+- `.cache/` (4.4 GB) - Replit system cache
+- `.git/` (49 MB) - Git history
+- `app/data/` (9.5 MB) - Vector embeddings (regenerated at runtime)
+
+**Actual Deployment Size:** ~15 MB of application code + Python runtime dependencies
+
+**Database Driver:** Added `psycopg2-binary==2.9.11` for PostgreSQL connectivity (Replit PostgreSQL backend)
