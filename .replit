@@ -1,5 +1,5 @@
 run = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --reload"
-modules = ["python-3.11", "python3"]
+modules = ["python-3.11", "python3", "postgresql-16"]
 
 [agent]
 expertMode = true
