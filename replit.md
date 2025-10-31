@@ -196,3 +196,24 @@ Successfully reduced deployment image size to meet Google Cloud Run's 8 GiB limi
 **Actual Deployment Size:** ~15 MB of application code + Python runtime dependencies
 
 **Database Driver:** Added `psycopg2-binary==2.9.11` for PostgreSQL connectivity (Replit PostgreSQL backend)
+
+## Import Path Fixes (October 30, 2025)
+
+Updated all import statements to use absolute imports for deployment compatibility:
+- Changed all relative imports (e.g., `from db import`) to absolute imports (e.g., `from app.db import`)
+- Updated 24 files across core, ingest, match, scripts, and rerank modules
+- Modified workflow command to run from project root: `uvicorn app.main:app --host 0.0.0.0 --port 5000`
+
+## Production Database Setup
+
+**For Production Deployment:**
+1. Open the **Deployments** pane in Replit
+2. Click on your deployment
+3. Add a **PostgreSQL database** using the "Add Database" button
+4. The `DATABASE_URL` environment variable will be automatically configured
+5. Redeploy your app
+
+**Development vs Production:**
+- **Development:** Uses SQLite (`app.db`) or Replit dev database (helium)
+- **Production:** Requires Replit managed PostgreSQL (automatically configured when added via Deployments pane)
+- The app will warn if SQLite is detected in production and recommend adding PostgreSQL
